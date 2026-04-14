@@ -145,6 +145,16 @@
                 var pluginId = 'ff0164d7-e8c0-44c1-bc61-45017125a155';
                 var config = {};
 
+                // Détecte le base path de Jellyfin (ex: "/test/a" si BaseUrl configuré,
+                // "" si accès direct sur port). Permet aux fetch de fonctionner
+                // que ce soit via un reverse proxy avec sub-path ou en accès direct.
+                // window.location.pathname = "/test/a/web/configurationpage?..."
+                var _basePath = window.location.pathname.split('/web/')[0].replace(/\/$/, '');
+                function jellyFedUrl(path) {
+                    return _basePath + path;
+                }
+                console.log('[JellyFed] basePath détecté :', _basePath || '(root)');
+
                 // ── Peers ────────────────────────────────────────────────────
 
                 function renderPeers(page, peers) {
@@ -203,7 +213,7 @@
                             removeBtn.querySelector('span').textContent = 'Suppression…';
 
                             console.log('[JellyFed] removePeer — POST /JellyFed/peer/purge pour "' + peerName + '"');
-                            fetch('/JellyFed/peer/purge', {
+                            fetch(jellyFedUrl('/JellyFed/peer/purge'), {
                                 method: 'POST',
                                 headers: {
                                     'Content-Type': 'application/json',
@@ -299,7 +309,7 @@
                     var token = page.querySelector('#federationToken').value;
                     if (!token) { return; }
 
-                    fetch('/JellyFed/manifest/stats', {
+                    fetch(jellyFedUrl('/JellyFed/manifest/stats'), {
                         headers: { 'Authorization': 'Bearer ' + token }
                     }).then(function (r) {
                         if (!r.ok) {
@@ -351,7 +361,7 @@
                             var token = page.querySelector('#federationToken').value;
                             btn.disabled = true;
                             btn.querySelector('span').textContent = 'Purging…';
-                            fetch('/JellyFed/peer/purge', {
+                            fetch(jellyFedUrl('/JellyFed/peer/purge'), {
                                 method: 'POST',
                                 headers: {
                                     'Content-Type': 'application/json',
@@ -393,7 +403,7 @@
                     console.log('[JellyFed] triggerSync —', peerName ? '"' + peerName + '"' : 'all peers');
                     var statusEl = page.querySelector('#syncStatus');
                     statusEl.textContent = 'Queuing sync…';
-                    fetch('/JellyFed/peer/sync', {
+                    fetch(jellyFedUrl('/JellyFed/peer/sync'), {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
