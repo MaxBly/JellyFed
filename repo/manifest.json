@@ -7,15 +7,15 @@
     "overview": "Native federation between Jellyfin instances",
     "owner": "MaxBly",
     "targetAbi": "10.9.0.0",
-    "timestamp": "2026-04-14T20:49:08.0000000Z",
+    "timestamp": "2026-04-14T21:17:20.0000000Z",
     "versions": [
       {
         "version": "0.1.0.0",
         "changelog": "Release 0.1.0.0.",
         "targetAbi": "10.9.0.0",
         "sourceUrl": "https://jellyfed.bly-net.com/repo/jellyfed_0.1.0.0.zip",
-        "checksum": "468b12f6621591c2cf91ea3fec172723",
-        "timestamp": "2026-04-14T20:49:08.0000000Z"
+        "checksum": "8b1beba8402dba0d325ce7d52a91d6b6",
+        "timestamp": "2026-04-14T21:17:20.0000000Z"
       }
     ]
   }
