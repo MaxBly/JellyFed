@@ -89,7 +89,7 @@ public class FederationController : ControllerBase
         [FromQuery] int limit = 5000,
         [FromQuery] int offset = 0)
     {
-        var baseUrl = $"{Request.Scheme}://{Request.Host}";
+        var baseUrl = $"{Request.Scheme}://{Request.Host}{Request.PathBase.Value?.TrimEnd('/')}";
         var token = Plugin.Instance!.Configuration.FederationToken;
 
         DateTime? sinceDate = null;
@@ -146,7 +146,7 @@ public class FederationController : ControllerBase
             return NotFound();
         }
 
-        var baseUrl = $"{Request.Scheme}://{Request.Host}";
+        var baseUrl = $"{Request.Scheme}://{Request.Host}{Request.PathBase.Value?.TrimEnd('/')}";
         var token = Plugin.Instance!.Configuration.FederationToken;
 
         var seasons = _libraryManager.GetItemList(new InternalItemsQuery
