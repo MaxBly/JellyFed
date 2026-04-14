@@ -1,0 +1,22 @@
+[
+  {
+    "category": "General",
+    "guid": "ff0164d7-e8c0-44c1-bc61-45017125a155",
+    "name": "JellyFed",
+    "description": "JellyFed connects multiple Jellyfin servers together. Libraries from federated instances appear as native items — with artwork, metadata and direct streaming — in any Jellyfin client, without modification.",
+    "overview": "Native federation between Jellyfin instances",
+    "owner": "MaxBly",
+    "targetAbi": "10.9.0.0",
+    "timestamp": "2026-04-14T20:46:02.0000000Z",
+    "versions": [
+      {
+        "version": "0.1.0.0",
+        "changelog": "Release 0.1.0.0.",
+        "targetAbi": "10.9.0.0",
+        "sourceUrl": "https://jellyfed.bly-net.com/repo/jellyfed_0.1.0.0.zip",
+        "checksum": "663e7b34659a60f7ac318b5099979291",
+        "timestamp": "2026-04-14T20:46:02.0000000Z"
+      }
+    ]
+  }
+]

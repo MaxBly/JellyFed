@@ -7,3 +7,6 @@ artifacts
 # .NET build output
 bin/
 obj/
+
+# Repo — ZIPs générés (regénérés par scripts/build-repo.sh)
+repo/*.zip

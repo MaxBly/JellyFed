@@ -1,0 +1,43 @@
+server {
+    listen 80;
+    server_name jellyfed.bly-net.com;
+
+    # Redirection HTTPS (certbot ajoutera le bloc 443 automatiquement)
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name jellyfed.bly-net.com;
+
+    ssl_certificate     /etc/letsencrypt/live/jellyfed.bly-net.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/jellyfed.bly-net.com/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    root /srv/jellyfed-repo;
+
+    # Repo Jellyfin — fichiers statiques (manifest.json + ZIPs)
+    location /repo/ {
+        alias /srv/jellyfed-repo/;
+        autoindex off;
+        add_header Cache-Control "no-cache, must-revalidate";
+        add_header Access-Control-Allow-Origin "*";
+
+        # Autoriser les types nécessaires
+        types {
+            application/json  json;
+            application/zip   zip;
+        }
+    }
+
+    # Page d'accueil minimale
+    location = / {
+        return 200 'JellyFed Plugin Repository\nhttps://jellyfed.bly-net.com/repo/manifest.json\n';
+        add_header Content-Type text/plain;
+    }
+
+    location / {
+        return 404;
+    }
+}
