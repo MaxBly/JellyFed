@@ -142,10 +142,8 @@ jobs:
         env:
           ZIP_NAME: ${{ steps.meta.outputs.zip_name }}
         run: |
-          set -x
           # -O : forcer l'ancien protocole scp (compatible avec command= dans authorized_keys)
-          scp -O -v -i ~/.ssh/vps_deploy -o StrictHostKeyChecking=yes \
-            "repo/manifest.json" "${{ secrets.VPS_DEPLOY_TARGET }}manifest.json"
-          scp -O -v -i ~/.ssh/vps_deploy -o StrictHostKeyChecking=yes \
-            "repo/$ZIP_NAME" "${{ secrets.VPS_DEPLOY_TARGET }}$ZIP_NAME"
+          SCP="scp -O -i ~/.ssh/vps_deploy -o StrictHostKeyChecking=yes"
+          $SCP "repo/manifest.json" "${{ secrets.VPS_DEPLOY_TARGET }}manifest.json"
+          $SCP "repo/$ZIP_NAME"     "${{ secrets.VPS_DEPLOY_TARGET }}$ZIP_NAME"
           echo "Déployé."
