@@ -9,6 +9,7 @@ jobs:
   build-and-deploy:
     name: Build · Package · Deploy
     runs-on: ubuntu-latest
+    environment: deploy
 
     steps:
       # ── Checkout ──────────────────────────────────────────────────────────
