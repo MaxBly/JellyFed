@@ -648,13 +648,22 @@ public class FederationController : ControllerBase
         var libraryPath = config.LibraryPath;
 
         // Remove federated items from Jellyfin's library index before deleting files.
+        // Wrapped in try-catch: library API may vary across Jellyfin versions; files are
+        // deleted from disk regardless, and Jellyfin will remove stale entries on next scan.
         if (!string.IsNullOrWhiteSpace(libraryPath))
         {
-            var manifest = ReadManifest(libraryPath);
-            var allPaths = manifest.Movies.Values.Select(e => e.Path)
-                .Concat(manifest.Series.Values.Select(e => e.Path))
-                .ToList();
-            RemoveLibraryItems(allPaths);
+            try
+            {
+                var manifest = ReadManifest(libraryPath);
+                var allPaths = manifest.Movies.Values.Select(e => e.Path)
+                    .Concat(manifest.Series.Values.Select(e => e.Path))
+                    .ToList();
+                RemoveLibraryItems(allPaths);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "JellyFed: network reset — could not remove library items from Jellyfin index (non-fatal, will clean up on next scan).");
+            }
         }
 
         // Delete all .strm files and the manifest from disk.
