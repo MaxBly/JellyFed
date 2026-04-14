@@ -1,8 +1,6 @@
 server {
     listen 80;
     server_name jellyfed.bly-net.com;
-
-    # Redirection HTTPS (certbot ajoutera le bloc 443 automatiquement)
     return 301 https://$host$request_uri;
 }
 
@@ -15,23 +13,59 @@ server {
     include /etc/letsencrypt/options-ssl-nginx.conf;
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
 
-    root /srv/jellyfed-repo;
-
-    # Repo Jellyfin — fichiers statiques (manifest.json + ZIPs)
+    # --- Repo plugin Jellyfin ---
     location /repo/ {
         alias /srv/jellyfed-repo/;
         autoindex off;
         add_header Cache-Control "no-cache, must-revalidate";
         add_header Access-Control-Allow-Origin "*";
-
-        # Autoriser les types nécessaires
         types {
             application/json  json;
             application/zip   zip;
         }
     }
 
-    # Page d'accueil minimale
+    # --- Instances de test JellyFed (proxy → blynk via WireGuard) ---
+    location /test/a {
+        proxy_pass         http://10.0.0.3:8097;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_http_version 1.1;
+        proxy_set_header   Upgrade    $http_upgrade;
+        proxy_set_header   Connection "upgrade";
+        proxy_buffering    off;
+        proxy_read_timeout 600s;
+    }
+
+    location /test/b {
+        proxy_pass         http://10.0.0.3:8098;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_http_version 1.1;
+        proxy_set_header   Upgrade    $http_upgrade;
+        proxy_set_header   Connection "upgrade";
+        proxy_buffering    off;
+        proxy_read_timeout 600s;
+    }
+
+    location /test/c {
+        proxy_pass         http://10.0.0.3:8099;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_http_version 1.1;
+        proxy_set_header   Upgrade    $http_upgrade;
+        proxy_set_header   Connection "upgrade";
+        proxy_buffering    off;
+        proxy_read_timeout 600s;
+    }
+
+    # Page d'accueil
     location = / {
         return 200 'JellyFed Plugin Repository\nhttps://jellyfed.bly-net.com/repo/manifest.json\n';
         add_header Content-Type text/plain;
