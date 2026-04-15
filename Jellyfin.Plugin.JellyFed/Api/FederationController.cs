@@ -90,8 +90,9 @@ public class FederationController : ControllerBase
         [FromQuery] int limit = 5000,
         [FromQuery] int offset = 0)
     {
-        var baseUrl = $"{Request.Scheme}://{Request.Host}{Request.PathBase.Value?.TrimEnd('/')}";
+        var baseUrl = GetBaseUrl();
         var token = Plugin.Instance!.Configuration.FederationToken;
+        var apiKey = Plugin.Instance.Configuration.JellyfinApiKey;
 
         DateTime? sinceDate = null;
         if (!string.IsNullOrEmpty(since) &&
@@ -104,12 +105,12 @@ public class FederationController : ControllerBase
 
         if (type is null or "Movie")
         {
-            items.AddRange(QueryItems(BaseItemKind.Movie, baseUrl, token, sinceDate));
+            items.AddRange(QueryItems(BaseItemKind.Movie, baseUrl, token, apiKey, sinceDate));
         }
 
         if (type is null or "Series")
         {
-            items.AddRange(QueryItems(BaseItemKind.Series, baseUrl, token, sinceDate));
+            items.AddRange(QueryItems(BaseItemKind.Series, baseUrl, token, apiKey, sinceDate));
         }
 
         var page = items.Skip(offset).Take(limit).ToArray();
@@ -147,8 +148,9 @@ public class FederationController : ControllerBase
             return NotFound();
         }
 
-        var baseUrl = $"{Request.Scheme}://{Request.Host}{Request.PathBase.Value?.TrimEnd('/')}";
+        var baseUrl = GetBaseUrl();
         var token = Plugin.Instance!.Configuration.FederationToken;
+        var apiKey = Plugin.Instance.Configuration.JellyfinApiKey;
 
         var seasons = _libraryManager.GetItemList(new InternalItemsQuery
         {
@@ -186,7 +188,7 @@ public class FederationController : ControllerBase
                     AirDate = ep.PremiereDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
                     RuntimeMinutes = TicksToMinutes(ep.RunTimeTicks),
                     StillUrl = HasImage(ep, ImageType.Primary)
-                        ? $"{baseUrl}/JellyFed/image/{ep.Id:N}/Primary?token={token}"
+                        ? ImageUrl(baseUrl, ep.Id, "Primary", token, apiKey)
                         : null,
                     StreamUrl = $"{baseUrl}/JellyFed/stream/{ep.Id:N}?token={token}"
                 });
@@ -207,6 +209,7 @@ public class FederationController : ControllerBase
         BaseItemKind kind,
         string baseUrl,
         string token,
+        string? apiKey,
         DateTime? since)
     {
         var query = new InternalItemsQuery
@@ -253,10 +256,10 @@ public class FederationController : ControllerBase
                 VoteAverage = item.CommunityRating.HasValue ? (double)item.CommunityRating.Value : null,
                 Genres = item.Genres ?? [],
                 PosterUrl = HasImage(item, ImageType.Primary)
-                    ? $"{baseUrl}/JellyFed/image/{item.Id:N}/Primary?token={token}"
+                    ? ImageUrl(baseUrl, item.Id, "Primary", token, apiKey)
                     : null,
                 BackdropUrl = HasImage(item, ImageType.Backdrop)
-                    ? $"{baseUrl}/JellyFed/image/{item.Id:N}/Backdrop?token={token}"
+                    ? ImageUrl(baseUrl, item.Id, "Backdrop", token, apiKey)
                     : null,
                 StreamUrl = kind == BaseItemKind.Movie
                     ? $"{baseUrl}/JellyFed/stream/{item.Id:N}?token={token}"
@@ -561,8 +564,7 @@ public class FederationController : ControllerBase
         var apiKey = Plugin.Instance?.Configuration.JellyfinApiKey;
         if (!string.IsNullOrWhiteSpace(apiKey))
         {
-            var baseUrl = $"{Request.Scheme}://{Request.Host}{Request.PathBase.Value?.TrimEnd('/')}";
-            return Redirect($"{baseUrl}/Videos/{itemId}/stream?api_key={apiKey}&Static=false");
+            return Redirect($"{GetBaseUrl()}/Videos/{itemId}/stream?api_key={apiKey}&Static=false");
         }
 
         // Fallback: serve the file directly (no transcoding — client must support the format).
@@ -769,6 +771,25 @@ public class FederationController : ControllerBase
         => item.HasImage(imageType, 0);
 
     private static string GenerateAccessToken() => Guid.NewGuid().ToString("N");
+
+    /// <summary>
+    /// Builds the base URL for this request, honouring X-Forwarded-Proto when behind a reverse proxy.
+    /// </summary>
+    private string GetBaseUrl()
+    {
+        var scheme = Request.Headers["X-Forwarded-Proto"].FirstOrDefault() ?? Request.Scheme;
+        return $"{scheme}://{Request.Host}{Request.PathBase.Value?.TrimEnd('/')}";
+    }
+
+    /// <summary>
+    /// Returns an image URL. Uses the native Jellyfin Images API when an API key is available
+    /// (avoids the JellyFed proxy hop and is more reliable), otherwise falls back to the
+    /// JellyFed proxy endpoint authenticated with the federation token.
+    /// </summary>
+    private static string ImageUrl(string baseUrl, Guid itemId, string imageType, string token, string? apiKey)
+        => !string.IsNullOrWhiteSpace(apiKey)
+            ? $"{baseUrl}/Items/{itemId:N}/Images/{imageType}?api_key={apiKey}"
+            : $"{baseUrl}/JellyFed/image/{itemId:N}/{imageType}?token={token}";
 
     private static bool ValidateStreamToken(string? token)
     {

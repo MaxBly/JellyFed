@@ -1,7 +1,7 @@
 ---
 name: "JellyFed"
 guid: "ff0164d7-e8c0-44c1-bc61-45017125a155"
-version: "0.1.0.12"
+version: "0.1.0.13"
 targetAbi: "10.11.0.0"
 framework: "net9.0"
 overview: "Native federation between Jellyfin instances"
