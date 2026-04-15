@@ -21,6 +21,7 @@ public class PluginConfiguration : BasePluginConfiguration
         FederationToken = string.Empty;
         SelfUrl = string.Empty;
         SelfName = string.Empty;
+        JellyfinApiKey = string.Empty;
     }
 
     /// <summary>
@@ -66,4 +67,12 @@ public class PluginConfiguration : BasePluginConfiguration
     /// Defaults to "JellyFed" if left empty.
     /// </summary>
     public string SelfName { get; set; }
+
+    /// <summary>
+    /// Gets or sets a Jellyfin API key used server-side to redirect stream requests
+    /// through Jellyfin's native pipeline (enabling transcoding).
+    /// Never stored in .strm files — only used server-side in HTTP redirects.
+    /// Create one in Dashboard → API Keys.
+    /// </summary>
+    public string JellyfinApiKey { get; set; }
 }

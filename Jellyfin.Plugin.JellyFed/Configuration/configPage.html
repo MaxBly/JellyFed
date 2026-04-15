@@ -63,6 +63,19 @@
                     </div>
 
                     <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="jellyfinApiKey">
+                            Jellyfin API Key (this instance)
+                        </label>
+                        <input id="jellyfinApiKey" name="JellyfinApiKey" type="password"
+                               class="emby-input" placeholder="Paste a Jellyfin API key" />
+                        <div class="fieldDescription">
+                            Used server-side to redirect streams through Jellyfin's native pipeline —
+                            enables transcoding for all formats (MKV, HEVC, …). Never stored in .strm files.
+                            Create one in <strong>Dashboard → API Keys</strong>, then paste it here.
+                        </div>
+                    </div>
+
+                    <div class="inputContainer">
                         <label class="inputLabel inputLabelUnfocused" for="selfUrl">
                             Self URL
                         </label>
@@ -457,7 +470,8 @@
                         config = loaded;
                         page.querySelector('#federationToken').value = loaded.FederationToken || loaded.federationToken || '';
                         page.querySelector('#syncIntervalHours').value = loaded.SyncIntervalHours || loaded.syncIntervalHours || 6;
-                        page.querySelector('#libraryPath').value = loaded.LibraryPath || loaded.libraryPath || '/config/jellyfed-library';
+                        page.querySelector('#libraryPath').value = loaded.LibraryPath || loaded.libraryPath || '';
+                        page.querySelector('#jellyfinApiKey').value = loaded.JellyfinApiKey || loaded.jellyfinApiKey || '';
                         page.querySelector('#selfName').value = loaded.SelfName || loaded.selfName || '';
                         page.querySelector('#selfUrl').value = loaded.SelfUrl || loaded.selfUrl || '';
 
@@ -496,6 +510,7 @@
                         FederationToken: page.querySelector('#federationToken').value,
                         SyncIntervalHours: parseInt(page.querySelector('#syncIntervalHours').value, 10) || 6,
                         LibraryPath: page.querySelector('#libraryPath').value,
+                        JellyfinApiKey: page.querySelector('#jellyfinApiKey').value,
                         SelfName: page.querySelector('#selfName').value,
                         SelfUrl: page.querySelector('#selfUrl').value,
                         Peers: collectPeers(page),

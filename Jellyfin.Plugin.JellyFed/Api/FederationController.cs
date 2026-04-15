@@ -554,6 +554,17 @@ public class FederationController : ControllerBase
             return BadRequest("Invalid item ID.");
         }
 
+        // If a Jellyfin API key is configured, redirect through Jellyfin's native pipeline.
+        // This enables server-side transcoding so all clients (browsers, apps) can play
+        // any format — Jellyfin decides whether to direct-play or transcode automatically.
+        var apiKey = Plugin.Instance?.Configuration.JellyfinApiKey;
+        if (!string.IsNullOrWhiteSpace(apiKey))
+        {
+            var baseUrl = $"{Request.Scheme}://{Request.Host}{Request.PathBase.Value?.TrimEnd('/')}";
+            return Redirect($"{baseUrl}/Videos/{itemId}/stream?api_key={apiKey}&Static=false");
+        }
+
+        // Fallback: serve the file directly (no transcoding — client must support the format).
         var item = _libraryManager.GetItemById(guid);
         if (item is null || string.IsNullOrEmpty(item.Path) || !System.IO.File.Exists(item.Path))
         {
