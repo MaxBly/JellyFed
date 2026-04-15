@@ -54,4 +54,19 @@ public class CatalogItemDto
 
     /// <summary>Gets or sets the date this item was last updated (ISO 8601).</summary>
     public string UpdatedAt { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the media container format (e.g. mkv, mp4).</summary>
+    public string? Container { get; set; }
+
+    /// <summary>Gets or sets the video codec (e.g. hevc, h264).</summary>
+    public string? VideoCodec { get; set; }
+
+    /// <summary>Gets or sets the video width in pixels.</summary>
+    public int? Width { get; set; }
+
+    /// <summary>Gets or sets the video height in pixels.</summary>
+    public int? Height { get; set; }
+
+    /// <summary>Gets or sets the audio codec (e.g. aac, ac3).</summary>
+    public string? AudioCodec { get; set; }
 }

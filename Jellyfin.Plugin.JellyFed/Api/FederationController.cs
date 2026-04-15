@@ -179,6 +179,31 @@ public class FederationController : ControllerBase
 
             foreach (var ep in episodes)
             {
+                string? epContainer = null;
+                string? epVideoCodec = null;
+                int? epWidth = null;
+                int? epHeight = null;
+                string? epAudioCodec = null;
+
+                if (ep is Video epVideo)
+                {
+                    epContainer = epVideo.Container;
+                    try
+                    {
+                        var streams = epVideo.GetMediaStreams();
+                        var vs = streams.FirstOrDefault(s => s.Type == MediaStreamType.Video);
+                        var audioStream = streams.FirstOrDefault(s => s.Type == MediaStreamType.Audio);
+                        epVideoCodec = vs?.Codec;
+                        epWidth = vs?.Width;
+                        epHeight = vs?.Height;
+                        epAudioCodec = audioStream?.Codec;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "JellyFed: could not read media streams for episode {Id}", ep.Id);
+                    }
+                }
+
                 seasonDto.Episodes.Add(new EpisodeDto
                 {
                     JellyfinId = ep.Id.ToString("N"),
@@ -190,7 +215,12 @@ public class FederationController : ControllerBase
                     StillUrl = HasImage(ep, ImageType.Primary)
                         ? ImageUrl(baseUrl, ep.Id, "Primary", token, apiKey)
                         : null,
-                    StreamUrl = $"{baseUrl}/JellyFed/stream/{ep.Id:N}?token={token}"
+                    StreamUrl = $"{baseUrl}/JellyFed/stream/{ep.Id:N}?token={token}",
+                    Container = epContainer,
+                    VideoCodec = epVideoCodec,
+                    Width = epWidth,
+                    Height = epHeight,
+                    AudioCodec = epAudioCodec
                 });
             }
 
@@ -242,6 +272,34 @@ public class FederationController : ControllerBase
                 continue;
             }
 
+            // Extract media stream info for movies so the client can write codec info
+            // into NFO files. Without this, Jellyfin has no idea the format is MKV/HEVC
+            // and will try to direct-play it — causing a fatal player error in browsers.
+            string? container = null;
+            string? videoCodec = null;
+            int? width = null;
+            int? height = null;
+            string? audioCodec = null;
+
+            if (kind == BaseItemKind.Movie && item is Video video)
+            {
+                container = video.Container;
+                try
+                {
+                    var streams = video.GetMediaStreams();
+                    var vs = streams.FirstOrDefault(s => s.Type == MediaStreamType.Video);
+                    var audioStream = streams.FirstOrDefault(s => s.Type == MediaStreamType.Audio);
+                    videoCodec = vs?.Codec;
+                    width = vs?.Width;
+                    height = vs?.Height;
+                    audioCodec = audioStream?.Codec;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "JellyFed: could not read media streams for item {Id}", item.Id);
+                }
+            }
+
             yield return new CatalogItemDto
             {
                 JellyfinId = item.Id.ToString("N"),
@@ -265,7 +323,12 @@ public class FederationController : ControllerBase
                     ? $"{baseUrl}/JellyFed/stream/{item.Id:N}?token={token}"
                     : null,
                 AddedAt = item.DateCreated.ToString("O", CultureInfo.InvariantCulture),
-                UpdatedAt = item.DateModified.ToString("O", CultureInfo.InvariantCulture)
+                UpdatedAt = item.DateModified.ToString("O", CultureInfo.InvariantCulture),
+                Container = container,
+                VideoCodec = videoCodec,
+                Width = width,
+                Height = height,
+                AudioCodec = audioCodec
             };
         }
     }

@@ -152,22 +152,29 @@ public class StrmWriter
 
     private static string BuildMovieNfo(CatalogItemDto item, PeerConfiguration peer)
     {
-        var doc = new XDocument(
-            new XDeclaration("1.0", "UTF-8", "yes"),
-            new XElement(
-                "movie",
-                new XElement("title", item.Title),
-                new XElement("originaltitle", item.OriginalTitle ?? item.Title),
-                new XElement("year", item.Year),
-                new XElement("plot", item.Overview ?? string.Empty),
-                new XElement("runtime", item.RuntimeMinutes),
-                new XElement("rating", item.VoteAverage?.ToString("F1", CultureInfo.InvariantCulture)),
-                item.Genres.Select(g => new XElement("genre", g)),
-                BuildUniqueIds(item),
-                new XElement("jellyfed_peer", peer.Name),
-                new XElement("jellyfed_id", item.JellyfinId)));
+        var movieEl = new XElement(
+            "movie",
+            new XElement("title", item.Title),
+            new XElement("originaltitle", item.OriginalTitle ?? item.Title),
+            new XElement("year", item.Year),
+            new XElement("plot", item.Overview ?? string.Empty),
+            new XElement("runtime", item.RuntimeMinutes),
+            new XElement("rating", item.VoteAverage?.ToString("F1", CultureInfo.InvariantCulture)),
+            item.Genres.Select(g => new XElement("genre", g)),
+            BuildUniqueIds(item),
+            new XElement("jellyfed_peer", peer.Name),
+            new XElement("jellyfed_id", item.JellyfinId));
 
-        return doc.ToString();
+        // Embed codec metadata so Jellyfin knows the format during library scan.
+        // Without this, Jellyfin has no codec info for .strm remote URLs and defaults
+        // to direct-play — the browser receives raw MKV/HEVC and crashes.
+        var fileInfo = BuildFileInfo(item.Container, item.VideoCodec, item.Width, item.Height, item.AudioCodec);
+        if (fileInfo is not null)
+        {
+            movieEl.Add(fileInfo);
+        }
+
+        return new XDocument(new XDeclaration("1.0", "UTF-8", "yes"), movieEl).ToString();
     }
 
     private static string BuildSeriesNfo(CatalogItemDto item, PeerConfiguration peer)
@@ -191,20 +198,56 @@ public class StrmWriter
 
     private static string BuildEpisodeNfo(EpisodeDto ep, int seasonNumber, PeerConfiguration peer)
     {
-        var doc = new XDocument(
-            new XDeclaration("1.0", "UTF-8", "yes"),
-            new XElement(
-                "episodedetails",
-                new XElement("title", ep.Title),
-                new XElement("season", seasonNumber),
-                new XElement("episode", ep.EpisodeNumber),
-                new XElement("plot", ep.Overview ?? string.Empty),
-                new XElement("aired", ep.AirDate ?? string.Empty),
-                new XElement("runtime", ep.RuntimeMinutes),
-                new XElement("jellyfed_peer", peer.Name),
-                new XElement("jellyfed_id", ep.JellyfinId)));
+        var epEl = new XElement(
+            "episodedetails",
+            new XElement("title", ep.Title),
+            new XElement("season", seasonNumber),
+            new XElement("episode", ep.EpisodeNumber),
+            new XElement("plot", ep.Overview ?? string.Empty),
+            new XElement("aired", ep.AirDate ?? string.Empty),
+            new XElement("runtime", ep.RuntimeMinutes),
+            new XElement("jellyfed_peer", peer.Name),
+            new XElement("jellyfed_id", ep.JellyfinId));
 
-        return doc.ToString();
+        var fileInfo = BuildFileInfo(ep.Container, ep.VideoCodec, ep.Width, ep.Height, ep.AudioCodec);
+        if (fileInfo is not null)
+        {
+            epEl.Add(fileInfo);
+        }
+
+        return new XDocument(new XDeclaration("1.0", "UTF-8", "yes"), epEl).ToString();
+    }
+
+    private static XElement? BuildFileInfo(string? container, string? videoCodec, int? width, int? height, string? audioCodec)
+    {
+        if (string.IsNullOrEmpty(videoCodec) && string.IsNullOrEmpty(container))
+        {
+            return null;
+        }
+
+        var videoEl = new XElement("video");
+        if (!string.IsNullOrEmpty(videoCodec))
+        {
+            videoEl.Add(new XElement("codec", videoCodec));
+        }
+
+        if (width.HasValue)
+        {
+            videoEl.Add(new XElement("width", width.Value));
+        }
+
+        if (height.HasValue)
+        {
+            videoEl.Add(new XElement("height", height.Value));
+        }
+
+        var streamdetails = new XElement("streamdetails", videoEl);
+        if (!string.IsNullOrEmpty(audioCodec))
+        {
+            streamdetails.Add(new XElement("audio", new XElement("codec", audioCodec)));
+        }
+
+        return new XElement("fileinfo", streamdetails);
     }
 
     private static XElement[] BuildUniqueIds(CatalogItemDto item)
