@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -128,6 +129,28 @@ public class StrmWriter
     }
 
     /// <summary>
+    /// Rewrites the NFO file for an already-synced movie with fresh codec/track info.
+    /// Called during sync for existing manifest entries so that library rescans pick up
+    /// the correct stream metadata without requiring a full Reset Network.
+    /// </summary>
+    /// <param name="folderPath">The movie's existing folder path.</param>
+    /// <param name="item">The catalog item from the latest catalog fetch.</param>
+    /// <param name="peer">The source peer.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A <see cref="Task"/> representing the asynchronous operation.</returns>
+    public async Task UpdateMovieNfoAsync(
+        string folderPath,
+        CatalogItemDto item,
+        PeerConfiguration peer,
+        CancellationToken cancellationToken)
+    {
+        var folderName = Path.GetFileName(folderPath);
+        var nfoPath = Path.Combine(folderPath, $"{folderName}.nfo");
+        await File.WriteAllTextAsync(nfoPath, BuildMovieNfo(item, peer), Encoding.UTF8, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Removes a previously synced item folder.
     /// </summary>
     /// <param name="folderPath">The item folder to remove.</param>
@@ -168,7 +191,7 @@ public class StrmWriter
         // Embed codec metadata so Jellyfin knows the format during library scan.
         // Without this, Jellyfin has no codec info for .strm remote URLs and defaults
         // to direct-play — the browser receives raw MKV/HEVC and crashes.
-        var fileInfo = BuildFileInfo(item.Container, item.VideoCodec, item.Width, item.Height, item.AudioCodec);
+        var fileInfo = BuildFileInfo(item.VideoCodec, item.Width, item.Height, item.MediaStreams, item.AudioCodec);
         if (fileInfo is not null)
         {
             movieEl.Add(fileInfo);
@@ -209,7 +232,7 @@ public class StrmWriter
             new XElement("jellyfed_peer", peer.Name),
             new XElement("jellyfed_id", ep.JellyfinId));
 
-        var fileInfo = BuildFileInfo(ep.Container, ep.VideoCodec, ep.Width, ep.Height, ep.AudioCodec);
+        var fileInfo = BuildFileInfo(ep.VideoCodec, ep.Width, ep.Height, ep.MediaStreams, ep.AudioCodec);
         if (fileInfo is not null)
         {
             epEl.Add(fileInfo);
@@ -218,9 +241,14 @@ public class StrmWriter
         return new XDocument(new XDeclaration("1.0", "UTF-8", "yes"), epEl).ToString();
     }
 
-    private static XElement? BuildFileInfo(string? container, string? videoCodec, int? width, int? height, string? audioCodec)
+    private static XElement? BuildFileInfo(
+        string? videoCodec,
+        int? width,
+        int? height,
+        IReadOnlyList<MediaStreamInfoDto> mediaStreams,
+        string? fallbackAudioCodec)
     {
-        if (string.IsNullOrEmpty(videoCodec) && string.IsNullOrEmpty(container))
+        if (string.IsNullOrEmpty(videoCodec) && mediaStreams.Count == 0)
         {
             return null;
         }
@@ -242,9 +270,54 @@ public class StrmWriter
         }
 
         var streamdetails = new XElement("streamdetails", videoEl);
-        if (!string.IsNullOrEmpty(audioCodec))
+
+        // Audio and subtitle tracks — written in stream order so Jellyfin respects
+        // IsDefault/IsForced flags when presenting language/track selectors.
+        bool hasAudio = false;
+        foreach (var s in mediaStreams)
         {
-            streamdetails.Add(new XElement("audio", new XElement("codec", audioCodec)));
+            if (s.Type == "Audio")
+            {
+                hasAudio = true;
+                var audioEl = new XElement("audio");
+                if (!string.IsNullOrEmpty(s.Codec))
+                {
+                    audioEl.Add(new XElement("codec", s.Codec));
+                }
+
+                if (!string.IsNullOrEmpty(s.Language))
+                {
+                    audioEl.Add(new XElement("language", s.Language));
+                }
+
+                if (!string.IsNullOrEmpty(s.Title))
+                {
+                    audioEl.Add(new XElement("title", s.Title));
+                }
+
+                streamdetails.Add(audioEl);
+            }
+            else if (s.Type == "Subtitle")
+            {
+                var subEl = new XElement("subtitle");
+                if (!string.IsNullOrEmpty(s.Language))
+                {
+                    subEl.Add(new XElement("language", s.Language));
+                }
+
+                if (!string.IsNullOrEmpty(s.Title))
+                {
+                    subEl.Add(new XElement("title", s.Title));
+                }
+
+                streamdetails.Add(subEl);
+            }
+        }
+
+        // Fallback: if older source plugin didn't send MediaStreams, use the scalar AudioCodec.
+        if (!hasAudio && !string.IsNullOrEmpty(fallbackAudioCodec))
+        {
+            streamdetails.Add(new XElement("audio", new XElement("codec", fallbackAudioCodec)));
         }
 
         return new XElement("fileinfo", streamdetails);

@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Text.Json.Serialization;
 
 namespace Jellyfin.Plugin.JellyFed.Api.Dto;
 
@@ -69,4 +70,8 @@ public class CatalogItemDto
 
     /// <summary>Gets or sets the audio codec (e.g. aac, ac3).</summary>
     public string? AudioCodec { get; set; }
+
+    /// <summary>Gets or sets all audio and subtitle tracks.</summary>
+    [JsonPropertyName("mediaStreams")]
+    public IReadOnlyList<MediaStreamInfoDto> MediaStreams { get; set; } = [];
 }

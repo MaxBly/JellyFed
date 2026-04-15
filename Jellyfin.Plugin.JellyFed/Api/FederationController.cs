@@ -179,30 +179,7 @@ public class FederationController : ControllerBase
 
             foreach (var ep in episodes)
             {
-                string? epContainer = null;
-                string? epVideoCodec = null;
-                int? epWidth = null;
-                int? epHeight = null;
-                string? epAudioCodec = null;
-
-                if (ep is Video epVideo)
-                {
-                    epContainer = epVideo.Container;
-                    try
-                    {
-                        var streams = epVideo.GetMediaStreams();
-                        var vs = streams.FirstOrDefault(s => s.Type == MediaStreamType.Video);
-                        var audioStream = streams.FirstOrDefault(s => s.Type == MediaStreamType.Audio);
-                        epVideoCodec = vs?.Codec;
-                        epWidth = vs?.Width;
-                        epHeight = vs?.Height;
-                        epAudioCodec = audioStream?.Codec;
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogDebug(ex, "JellyFed: could not read media streams for episode {Id}", ep.Id);
-                    }
-                }
+                var epInfo = ExtractStreamInfo(ep);
 
                 seasonDto.Episodes.Add(new EpisodeDto
                 {
@@ -216,11 +193,12 @@ public class FederationController : ControllerBase
                         ? ImageUrl(baseUrl, ep.Id, "Primary", token, apiKey)
                         : null,
                     StreamUrl = $"{baseUrl}/JellyFed/stream/{ep.Id:N}?token={token}",
-                    Container = epContainer,
-                    VideoCodec = epVideoCodec,
-                    Width = epWidth,
-                    Height = epHeight,
-                    AudioCodec = epAudioCodec
+                    Container = epInfo.Container,
+                    VideoCodec = epInfo.VideoCodec,
+                    Width = epInfo.Width,
+                    Height = epInfo.Height,
+                    AudioCodec = epInfo.AudioCodec,
+                    MediaStreams = epInfo.MediaStreams
                 });
             }
 
@@ -272,33 +250,10 @@ public class FederationController : ControllerBase
                 continue;
             }
 
-            // Extract media stream info for movies so the client can write codec info
-            // into NFO files. Without this, Jellyfin has no idea the format is MKV/HEVC
-            // and will try to direct-play it — causing a fatal player error in browsers.
-            string? container = null;
-            string? videoCodec = null;
-            int? width = null;
-            int? height = null;
-            string? audioCodec = null;
-
-            if (kind == BaseItemKind.Movie && item is Video video)
-            {
-                container = video.Container;
-                try
-                {
-                    var streams = video.GetMediaStreams();
-                    var vs = streams.FirstOrDefault(s => s.Type == MediaStreamType.Video);
-                    var audioStream = streams.FirstOrDefault(s => s.Type == MediaStreamType.Audio);
-                    videoCodec = vs?.Codec;
-                    width = vs?.Width;
-                    height = vs?.Height;
-                    audioCodec = audioStream?.Codec;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogDebug(ex, "JellyFed: could not read media streams for item {Id}", item.Id);
-                }
-            }
+            // Extract codec + all audio/subtitle tracks so the client writes complete
+            // <fileinfo><streamdetails> in NFO files. Without this, Jellyfin defaults to
+            // direct-play and the browser receives raw MKV/HEVC → fatal player error.
+            var info = kind == BaseItemKind.Movie ? ExtractStreamInfo(item) : default;
 
             yield return new CatalogItemDto
             {
@@ -324,11 +279,12 @@ public class FederationController : ControllerBase
                     : null,
                 AddedAt = item.DateCreated.ToString("O", CultureInfo.InvariantCulture),
                 UpdatedAt = item.DateModified.ToString("O", CultureInfo.InvariantCulture),
-                Container = container,
-                VideoCodec = videoCodec,
-                Width = width,
-                Height = height,
-                AudioCodec = audioCodec
+                Container = info.Container,
+                VideoCodec = info.VideoCodec,
+                Width = info.Width,
+                Height = info.Height,
+                AudioCodec = info.AudioCodec,
+                MediaStreams = info.MediaStreams
             };
         }
     }
@@ -627,7 +583,11 @@ public class FederationController : ControllerBase
         var apiKey = Plugin.Instance?.Configuration.JellyfinApiKey;
         if (!string.IsNullOrWhiteSpace(apiKey))
         {
-            return Redirect($"{GetBaseUrl()}/Videos/{itemId}/stream?api_key={apiKey}&Static=false");
+            // Static=true → source Jellyfin serves the raw file with proper range request
+            // support. This allows the client's FFmpeg to seek within the stream (for HLS
+            // transcoding). Static=false would start a transcoding session on the source,
+            // which doesn't support range-based seeking.
+            return Redirect($"{GetBaseUrl()}/Videos/{itemId}/stream?api_key={apiKey}&Static=true");
         }
 
         // Fallback: serve the file directly (no transcoding — client must support the format).
@@ -834,6 +794,76 @@ public class FederationController : ControllerBase
         => item.HasImage(imageType, 0);
 
     private static string GenerateAccessToken() => Guid.NewGuid().ToString("N");
+
+    /// <summary>
+    /// Extracts codec and all audio/subtitle track info from a BaseItem.
+    /// Called for every movie and episode exported in the catalog so the receiving
+    /// server can write complete &lt;fileinfo&gt;&lt;streamdetails&gt; into NFO files.
+    /// </summary>
+    private (string? Container, string? VideoCodec, int? Width, int? Height, string? AudioCodec, IReadOnlyList<MediaStreamInfoDto> MediaStreams) ExtractStreamInfo(BaseItem item)
+    {
+        if (item is not Video video)
+        {
+            return (null, null, null, null, null, []);
+        }
+
+        var container = video.Container;
+        string? videoCodec = null;
+        int? width = null;
+        int? height = null;
+        string? primaryAudioCodec = null;
+        var mediaStreams = new List<MediaStreamInfoDto>();
+
+        try
+        {
+            var streams = video.GetMediaStreams();
+
+            foreach (var s in streams)
+            {
+                if (s.Type == MediaStreamType.Video && videoCodec is null)
+                {
+                    videoCodec = s.Codec;
+                    width = s.Width;
+                    height = s.Height;
+                }
+                else if (s.Type == MediaStreamType.Audio)
+                {
+                    if (primaryAudioCodec is null)
+                    {
+                        primaryAudioCodec = s.Codec;
+                    }
+
+                    mediaStreams.Add(new MediaStreamInfoDto
+                    {
+                        Type = "Audio",
+                        Codec = s.Codec,
+                        Language = s.Language,
+                        Title = s.Title,
+                        IsDefault = s.IsDefault,
+                        IsForced = s.IsForced
+                    });
+                }
+                else if (s.Type == MediaStreamType.Subtitle)
+                {
+                    mediaStreams.Add(new MediaStreamInfoDto
+                    {
+                        Type = "Subtitle",
+                        Codec = s.Codec,
+                        Language = s.Language,
+                        Title = s.Title,
+                        IsDefault = s.IsDefault,
+                        IsForced = s.IsForced
+                    });
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "JellyFed: could not read media streams for item {Id}", item.Id);
+        }
+
+        return (container, videoCodec, width, height, primaryAudioCodec, mediaStreams);
+    }
 
     /// <summary>
     /// Builds the base URL for this request, honouring X-Forwarded-Proto when behind a reverse proxy.

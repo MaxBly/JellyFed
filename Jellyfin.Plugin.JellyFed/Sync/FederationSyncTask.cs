@@ -176,6 +176,15 @@ public class FederationSyncTask : IScheduledTask
                             }
                         }
 
+                        // Always rewrite the NFO with the latest codec/track info so that
+                        // subsequent Jellyfin library scans pick up subtitles, audio tracks,
+                        // and codec metadata without requiring a full Reset Network.
+                        if (Directory.Exists(existingMovieEntry.Path))
+                        {
+                            await _strmWriter.UpdateMovieNfoAsync(existingMovieEntry.Path, item, peer, cancellationToken)
+                                .ConfigureAwait(false);
+                        }
+
                         skippedMovies++;
                         continue;
                     }
