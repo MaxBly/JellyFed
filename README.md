@@ -120,6 +120,7 @@ La renseigner dans la config JellyFed. Permet :
 - [`docs/api.md`](docs/api.md) — Référence API (tous les endpoints + DTOs)
 - [`docs/strm.md`](docs/strm.md) — Fichiers .strm, NFO format, comportement lecture/transcodage
 - [`docs/roadmap.md`](docs/roadmap.md) — État d'avancement, tests, bugs connus, features à venir
+- [`docs/dev-local-repo.md`](docs/dev-local-repo.md) — Servir le dépôt plugin (`repo/`) sur le LAN avec Docker (dev) ; raccourci : `make dev` (build + ZIP + serveur)
 
 ---
 

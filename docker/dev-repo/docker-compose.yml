@@ -1,0 +1,17 @@
+# Dépôt JellyFed sur le réseau local (développement).
+# Voir docs/dev-local-repo.md — de préférence lancer via scripts/dev-repo-up.sh
+#
+# Écoute sur toutes les interfaces (0.0.0.0) pour être joignable depuis le LAN.
+
+services:
+  jellyfed-dev-repo:
+    image: nginx:alpine
+    container_name: jellyfed-dev-repo
+    ports:
+      - "0.0.0.0:${JELLYFED_DEV_REPO_PORT:-8765}:80"
+    volumes:
+      # Chemin absolu recommandé (export JELLYFED_REPO_DIR par scripts/dev-repo-up.sh ou make dev).
+      # Sinon repli ../../repo relatif au fichier compose (peut échouer selon le cwd / l’OS).
+      - ${JELLYFED_REPO_DIR:-../../repo}:/usr/share/nginx/html:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    restart: "no"
