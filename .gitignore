@@ -8,7 +8,8 @@ artifacts
 bin/
 obj/
 
-# Repo — ZIPs générés (regénérés par scripts/build-repo.sh ; inclut le lien jellyfed_1.3.3.7.zip)
+# Repo — ZIPs générés (regénérés par scripts/build-repo.sh ; inclut les symlinks dev
+# jellyfed_1.3.3.<epoch>.zip créés par generate-manifest-local.py).
 repo/*.zip
 
 # Manifeste généré pour le dépôt local (LAN / Docker) — voir docs/dev-local-repo.md

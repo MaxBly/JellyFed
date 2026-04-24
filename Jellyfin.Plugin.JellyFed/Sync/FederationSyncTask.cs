@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Text.Json;
@@ -7,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Data.Enums;
 using Jellyfin.Database.Implementations.Enums;
+using Jellyfin.Plugin.JellyFed.Configuration;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Entities;
@@ -17,10 +19,15 @@ namespace Jellyfin.Plugin.JellyFed.Sync;
 
 /// <summary>
 /// Scheduled task that synchronizes catalogs from all configured federated peers.
+/// Exposes <see cref="SyncPeerAsync"/> so admin endpoints can re-use the same per-peer
+/// pipeline without going through the scheduler queue.
 /// </summary>
 public class FederationSyncTask : IScheduledTask
 {
-    private const string ManifestFileName = ".jellyfed-manifest.json";
+    /// <summary>
+    /// File name of the persisted manifest in the library path.
+    /// </summary>
+    public const string ManifestFileName = ".jellyfed-manifest.json";
 
     private readonly ILibraryManager _libraryManager;
     private readonly PeerClient _peerClient;
@@ -92,30 +99,152 @@ public class FederationSyncTask : IScheduledTask
             return;
         }
 
-        Directory.CreateDirectory(Path.Combine(libraryPath, "Films"));
-        Directory.CreateDirectory(Path.Combine(libraryPath, "Series"));
+        Directory.CreateDirectory(libraryPath);
 
         var manifest = LoadManifest(libraryPath);
-        var seenMovieKeys = new HashSet<string>(StringComparer.Ordinal);
-        var seenSeriesKeys = new HashSet<string>(StringComparer.Ordinal);
+        var localTmdbIds = BuildLocalTmdbIds(config);
+        var states = PeerStateStore.Load(libraryPath);
 
-        // TMDB IDs déjà présents dans la bibliothèque locale (hors jellyfed-library).
-        // Évite de réécrire en .strm des contenus que cette instance possède déjà.
-        var localTmdbIds = BuildLocalTmdbIds(libraryPath);
+        var allSeenMovieKeys = new HashSet<string>(StringComparer.Ordinal);
+        var allSeenSeriesKeys = new HashSet<string>(StringComparer.Ordinal);
 
-        var enabledPeers = config.Peers;
-        int totalPeers = enabledPeers.Count;
+        int totalPeers = config.Peers.Count;
         int peerIndex = 0;
 
-        foreach (var peer in enabledPeers)
+        foreach (var peer in config.Peers)
         {
             if (!peer.Enabled)
             {
                 peerIndex++;
+                progress.Report((double)peerIndex / Math.Max(1, totalPeers) * 90);
                 continue;
             }
 
             cancellationToken.ThrowIfCancellationRequested();
+
+            var peerResult = await SyncSinglePeerAsync(
+                peer,
+                config,
+                manifest,
+                localTmdbIds,
+                allSeenMovieKeys,
+                allSeenSeriesKeys,
+                cancellationToken).ConfigureAwait(false);
+
+            // Persist per-peer status so the admin UI reflects success/failure instantly.
+            if (!states.TryGetValue(peer.Name, out var status))
+            {
+                status = new PeerStatus();
+                states[peer.Name] = status;
+            }
+
+            if (peerResult.Error is null)
+            {
+                status.MarkSynced(peerResult.DurationMs);
+            }
+            else
+            {
+                status.MarkSyncFailed(peerResult.Error, peerResult.DurationMs);
+            }
+
+            peerIndex++;
+            progress.Report((double)peerIndex / Math.Max(1, totalPeers) * 90);
+        }
+
+        // Prune globally: any manifest entry whose key wasn't seen in any enabled peer's pass.
+        PruneDeleted(manifest.Movies, allSeenMovieKeys);
+        PruneDeleted(manifest.Series, allSeenSeriesKeys);
+
+        SaveManifest(libraryPath, manifest);
+        PeerStateStore.Save(libraryPath, states);
+
+        progress.Report(95);
+        _logger.LogInformation("JellyFed sync: triggering Jellyfin library scan.");
+        _libraryManager.QueueLibraryScan();
+
+        progress.Report(100);
+        _logger.LogInformation("JellyFed sync: complete.");
+    }
+
+    /// <summary>
+    /// Runs the full sync pipeline for a single peer and returns a summary result.
+    /// Used by <see cref="ExecuteAsync"/> and by the admin <c>/peer/{name}/sync</c> endpoint.
+    /// Callers that invoke this independently are responsible for persisting the manifest
+    /// and peer state afterwards (see <see cref="SyncPeerAsync"/>).
+    /// </summary>
+    /// <param name="peer">The peer to sync.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Result of the sync attempt.</returns>
+    public async Task<PeerSyncResult> SyncPeerAsync(
+        PeerConfiguration peer,
+        CancellationToken cancellationToken)
+    {
+        var config = Plugin.Instance?.Configuration;
+        if (config is null || string.IsNullOrWhiteSpace(config.LibraryPath))
+        {
+            return new PeerSyncResult { Error = "Plugin configuration unavailable." };
+        }
+
+        Directory.CreateDirectory(config.LibraryPath);
+        var manifest = LoadManifest(config.LibraryPath);
+        var localTmdbIds = BuildLocalTmdbIds(config);
+        var states = PeerStateStore.Load(config.LibraryPath);
+
+        // For single-peer sync, only consider this peer's keys when pruning so we never
+        // touch entries belonging to other peers.
+        var seenMovieKeys = new HashSet<string>(StringComparer.Ordinal);
+        var seenSeriesKeys = new HashSet<string>(StringComparer.Ordinal);
+
+        var result = await SyncSinglePeerAsync(
+            peer,
+            config,
+            manifest,
+            localTmdbIds,
+            seenMovieKeys,
+            seenSeriesKeys,
+            cancellationToken).ConfigureAwait(false);
+
+        // Prune only this peer's stale entries.
+        result.Pruned += PruneDeletedForPeer(manifest.Movies, seenMovieKeys, peer.Name);
+        result.Pruned += PruneDeletedForPeer(manifest.Series, seenSeriesKeys, peer.Name);
+
+        if (!states.TryGetValue(peer.Name, out var status))
+        {
+            status = new PeerStatus();
+            states[peer.Name] = status;
+        }
+
+        if (result.Error is null)
+        {
+            status.MarkSynced(result.DurationMs);
+        }
+        else
+        {
+            status.MarkSyncFailed(result.Error, result.DurationMs);
+        }
+
+        SaveManifest(config.LibraryPath, manifest);
+        PeerStateStore.Save(config.LibraryPath, states);
+
+        _libraryManager.QueueLibraryScan();
+
+        return result;
+    }
+
+    private async Task<PeerSyncResult> SyncSinglePeerAsync(
+        PeerConfiguration peer,
+        PluginConfiguration config,
+        Manifest manifest,
+        HashSet<string> localTmdbIds,
+        HashSet<string> seenMovieKeys,
+        HashSet<string> seenSeriesKeys,
+        CancellationToken cancellationToken)
+    {
+        var sw = Stopwatch.StartNew();
+        var result = new PeerSyncResult();
+
+        try
+        {
             _logger.LogInformation("JellyFed sync: starting peer {PeerName}", peer.Name);
 
             var catalog = await _peerClient.GetCatalogAsync(peer, null, cancellationToken)
@@ -123,42 +252,57 @@ public class FederationSyncTask : IScheduledTask
 
             if (catalog is null)
             {
+                result.Error = "Peer unreachable.";
                 _logger.LogWarning("JellyFed sync: could not reach peer {PeerName}, skipping.", peer.Name);
-                peerIndex++;
-                progress.Report((double)peerIndex / totalPeers * 100);
-                continue;
+                return result;
             }
 
-            int addedMovies = 0, addedSeries = 0, skippedMovies = 0, skippedSeries = 0;
+            var peerSeg = StrmWriter.SanitizePeerFolderSegment(peer.Name);
 
             foreach (var item in catalog.Items)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
                 var key = ManifestKey(item.TmdbId, peer.Name, item.JellyfinId);
+                var isAnime = CatalogItemClassifier.IsAnime(item);
 
                 // Skip items already owned locally (same TMDB ID in local library).
                 if (!string.IsNullOrEmpty(item.TmdbId) && localTmdbIds.Contains(item.TmdbId))
                 {
                     if (item.Type == "Movie")
                     {
-                        skippedMovies++;
+                        result.SkippedMovies++;
                     }
                     else
                     {
-                        skippedSeries++;
+                        result.SkippedSeries++;
                     }
 
                     continue;
                 }
 
+                // Honor per-peer type toggles. Anime items require SyncAnime in addition to the
+                // Movies/Series toggle so admins can keep syncing normal series while filtering
+                // out anime (or vice versa).
+                if (isAnime && !peer.SyncAnime)
+                {
+                    continue;
+                }
+
                 if (item.Type == "Movie" && peer.SyncMovies)
                 {
+                    var movieTypeRoot = isAnime
+                        ? config.GetEffectiveAnimeRoot()
+                        : config.GetEffectiveMoviesRoot();
+                    if (string.IsNullOrWhiteSpace(movieTypeRoot))
+                    {
+                        _logger.LogWarning("JellyFed sync: movies root not configured, skipping movie.");
+                        continue;
+                    }
+
                     seenMovieKeys.Add(key);
                     if (manifest.Movies.TryGetValue(key, out var existingMovieEntry))
                     {
-                        // Update STRM URL transparently (handles migration from old api_key format
-                        // to the new /JellyFed/stream/ proxy format).
                         if (!string.IsNullOrEmpty(item.StreamUrl))
                         {
                             var folderName = Path.GetFileName(existingMovieEntry.Path);
@@ -176,20 +320,19 @@ public class FederationSyncTask : IScheduledTask
                             }
                         }
 
-                        // Always rewrite the NFO with the latest codec/track info so that
-                        // subsequent Jellyfin library scans pick up subtitles, audio tracks,
-                        // and codec metadata without requiring a full Reset Network.
                         if (Directory.Exists(existingMovieEntry.Path))
                         {
                             await _strmWriter.UpdateMovieNfoAsync(existingMovieEntry.Path, item, peer, cancellationToken)
                                 .ConfigureAwait(false);
                         }
 
-                        skippedMovies++;
+                        result.SkippedMovies++;
                         continue;
                     }
 
-                    var folderPath = await _strmWriter.WriteMovieAsync(libraryPath, item, peer, cancellationToken)
+                    var movieContentRoot = Path.Combine(movieTypeRoot, peerSeg);
+                    Directory.CreateDirectory(movieContentRoot);
+                    var folderPath = await _strmWriter.WriteMovieAsync(movieContentRoot, item, peer, cancellationToken)
                         .ConfigureAwait(false);
 
                     manifest.Movies[key] = new ManifestEntry
@@ -199,14 +342,23 @@ public class FederationSyncTask : IScheduledTask
                         JellyfinId = item.JellyfinId,
                         SyncedAt = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture)
                     };
-                    addedMovies++;
+                    result.AddedMovies++;
                 }
                 else if (item.Type == "Series" && peer.SyncSeries)
                 {
+                    var seriesTypeRoot = isAnime
+                        ? config.GetEffectiveAnimeRoot()
+                        : config.GetEffectiveSeriesRoot();
+                    if (string.IsNullOrWhiteSpace(seriesTypeRoot))
+                    {
+                        _logger.LogWarning("JellyFed sync: series root not configured, skipping series.");
+                        continue;
+                    }
+
                     seenSeriesKeys.Add(key);
                     if (manifest.Series.ContainsKey(key))
                     {
-                        skippedSeries++;
+                        result.SkippedSeries++;
                         continue;
                     }
 
@@ -219,7 +371,9 @@ public class FederationSyncTask : IScheduledTask
                         continue;
                     }
 
-                    var folderPath = await _strmWriter.WriteSeriesAsync(libraryPath, item, seasons, peer, cancellationToken)
+                    var seriesContentRoot = Path.Combine(seriesTypeRoot, peerSeg);
+                    Directory.CreateDirectory(seriesContentRoot);
+                    var folderPath = await _strmWriter.WriteSeriesAsync(seriesContentRoot, item, seasons, peer, cancellationToken)
                         .ConfigureAwait(false);
 
                     manifest.Series[key] = new ManifestEntry
@@ -229,13 +383,19 @@ public class FederationSyncTask : IScheduledTask
                         JellyfinId = item.JellyfinId,
                         SyncedAt = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture)
                     };
-                    addedSeries++;
+                    result.AddedSeries++;
                 }
             }
 
-            _logger.LogInformation("JellyFed sync: peer {PeerName} — +{AddedMovies} movies, +{AddedSeries} series, skipped {SkipM}/{SkipS}", peer.Name, addedMovies, addedSeries, skippedMovies, skippedSeries);
+            _logger.LogInformation(
+                "JellyFed sync: peer {PeerName} — +{AddedMovies} movies, +{AddedSeries} series, skipped {SkipM}/{SkipS}",
+                peer.Name,
+                result.AddedMovies,
+                result.AddedSeries,
+                result.SkippedMovies,
+                result.SkippedSeries);
 
-            // Auto-registration : on s'annonce au peer pour qu'il nous ajoute en retour.
+            // Auto-registration: announce self so the peer can add us back.
             var selfUrl = config.SelfUrl;
             if (!string.IsNullOrWhiteSpace(selfUrl))
             {
@@ -250,23 +410,23 @@ public class FederationSyncTask : IScheduledTask
                     config.FederationToken,
                     cancellationToken).ConfigureAwait(false);
             }
-
-            peerIndex++;
-            progress.Report((double)peerIndex / totalPeers * 90);
         }
+        catch (OperationCanceledException)
+        {
+            result.Error = "Sync cancelled.";
+            throw;
+        }
+#pragma warning disable CA1031 // Broad catch to record the error in PeerStatus without crashing the task.
+        catch (Exception ex)
+        {
+            result.Error = ex.Message;
+            _logger.LogError(ex, "JellyFed sync: peer {PeerName} failed.", peer.Name);
+        }
+#pragma warning restore CA1031
 
-        // Remove items that disappeared from their peer's catalog.
-        PruneDeleted(manifest.Movies, seenMovieKeys);
-        PruneDeleted(manifest.Series, seenSeriesKeys);
-
-        SaveManifest(libraryPath, manifest);
-
-        progress.Report(95);
-        _logger.LogInformation("JellyFed sync: triggering Jellyfin library scan.");
-        _libraryManager.QueueLibraryScan();
-
-        progress.Report(100);
-        _logger.LogInformation("JellyFed sync: complete.");
+        sw.Stop();
+        result.DurationMs = sw.ElapsedMilliseconds;
+        return result;
     }
 
     private void PruneDeleted(Dictionary<string, ManifestEntry> entries, HashSet<string> seenKeys)
@@ -287,7 +447,35 @@ public class FederationSyncTask : IScheduledTask
         }
     }
 
-    private HashSet<string> BuildLocalTmdbIds(string federatedLibraryPath)
+    private int PruneDeletedForPeer(
+        Dictionary<string, ManifestEntry> entries,
+        HashSet<string> seenKeys,
+        string peerName)
+    {
+        var toRemove = new List<string>();
+        foreach (var (key, entry) in entries)
+        {
+            if (!string.Equals(entry.PeerName, peerName, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (!seenKeys.Contains(key))
+            {
+                _strmWriter.DeleteItem(entry.Path);
+                toRemove.Add(key);
+            }
+        }
+
+        foreach (var key in toRemove)
+        {
+            entries.Remove(key);
+        }
+
+        return toRemove.Count;
+    }
+
+    private HashSet<string> BuildLocalTmdbIds(PluginConfiguration pluginConfig)
     {
         var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var items = _libraryManager.GetItemList(new InternalItemsQuery
@@ -299,9 +487,8 @@ public class FederationSyncTask : IScheduledTask
 
         foreach (var item in items)
         {
-            // Ignorer les items de la bibliothèque fédérée (ce sont des .strm)
             if (!string.IsNullOrEmpty(item.Path) &&
-                item.Path.StartsWith(federatedLibraryPath, StringComparison.OrdinalIgnoreCase))
+                FederatedPathHelper.IsUnderFederatedContent(item.Path, pluginConfig))
             {
                 continue;
             }
@@ -317,9 +504,12 @@ public class FederationSyncTask : IScheduledTask
     }
 
     private static string ManifestKey(string? tmdbId, string peerName, string jellyfinId)
-        => string.IsNullOrEmpty(tmdbId)
-            ? $"no-tmdb:{peerName}:{jellyfinId}"
-            : $"tmdb:{tmdbId}";
+    {
+        var p = peerName.Trim();
+        return string.IsNullOrEmpty(tmdbId)
+            ? $"no-tmdb:{p}:{jellyfinId}"
+            : $"tmdb:{tmdbId}:{p}";
+    }
 
     private static Manifest LoadManifest(string libraryPath)
     {
@@ -334,10 +524,12 @@ public class FederationSyncTask : IScheduledTask
             var json = File.ReadAllText(path);
             return JsonSerializer.Deserialize<Manifest>(json, JsonOptions) ?? new Manifest();
         }
+#pragma warning disable CA1031 // Intentionally broad: corrupt manifest must not crash sync.
         catch
         {
             return new Manifest();
         }
+#pragma warning restore CA1031
     }
 
     private static void SaveManifest(string libraryPath, Manifest manifest)

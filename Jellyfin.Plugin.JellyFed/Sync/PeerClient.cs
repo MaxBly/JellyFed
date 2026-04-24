@@ -99,6 +99,55 @@ public class PeerClient
     }
 
     /// <summary>
+    /// Pings a peer's /JellyFed/health endpoint with the provided URL + token.
+    /// Used by the admin UI when adding or editing a peer, so misconfiguration shows up immediately.
+    /// </summary>
+    /// <param name="url">Peer base URL.</param>
+    /// <param name="federationToken">Federation token to present in the Bearer header.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Tuple (reachable, reportedVersion); reportedVersion is null when unreachable.</returns>
+    public async Task<(bool Reachable, string? Version)> HealthCheckAsync(
+        string url,
+        string federationToken,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return (false, null);
+        }
+
+        var healthUrl = url.TrimEnd('/') + "/JellyFed/health";
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, healthUrl);
+            if (!string.IsNullOrWhiteSpace(federationToken))
+            {
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", federationToken);
+            }
+
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+
+            using var response = await _http.SendAsync(request, cts.Token).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                return (false, null);
+            }
+
+            var health = await response.Content
+                .ReadFromJsonAsync<HealthDto>(cts.Token)
+                .ConfigureAwait(false);
+            return (true, health?.Version);
+        }
+#pragma warning disable CA1031 // Health-check is best-effort; surface any failure as "unreachable".
+        catch
+        {
+            return (false, null);
+        }
+#pragma warning restore CA1031
+    }
+
+    /// <summary>
     /// Downloads a remote image to a local file path.
     /// </summary>
     /// <param name="imageUrl">The remote image URL.</param>
@@ -206,5 +255,10 @@ public class PeerClient
     {
         var baseUrl = peer.Url.TrimEnd('/');
         return baseUrl + path;
+    }
+
+    private sealed class HealthDto
+    {
+        public string? Version { get; set; }
     }
 }

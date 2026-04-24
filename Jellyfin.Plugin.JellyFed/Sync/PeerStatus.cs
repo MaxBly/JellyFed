@@ -23,6 +23,26 @@ public class PeerStatus
     public int SeriesCount { get; set; }
 
     /// <summary>
+    /// Gets or sets the ISO 8601 timestamp of the last attempted sync (success or failure).
+    /// </summary>
+    public string? LastSyncAt { get; set; }
+
+    /// <summary>
+    /// Gets or sets the status of the last sync attempt: "ok", "failed" or "never".
+    /// </summary>
+    public string LastSyncStatus { get; set; } = "never";
+
+    /// <summary>
+    /// Gets or sets the error message from the last failed sync, or null when the last sync succeeded.
+    /// </summary>
+    public string? LastSyncError { get; set; }
+
+    /// <summary>
+    /// Gets or sets the duration of the last sync attempt in milliseconds.
+    /// </summary>
+    public long LastSyncDurationMs { get; set; }
+
+    /// <summary>
     /// Updates this status from a successful health + catalog response.
     /// </summary>
     /// <param name="version">JellyFed version string.</param>
@@ -43,5 +63,30 @@ public class PeerStatus
     public void MarkOffline()
     {
         Online = false;
+    }
+
+    /// <summary>
+    /// Records a successful sync. Updates LastSyncAt/Status/DurationMs and clears the previous error.
+    /// </summary>
+    /// <param name="durationMs">Sync duration in milliseconds.</param>
+    public void MarkSynced(long durationMs)
+    {
+        LastSyncAt = DateTime.UtcNow.ToString("O");
+        LastSyncStatus = "ok";
+        LastSyncError = null;
+        LastSyncDurationMs = durationMs;
+    }
+
+    /// <summary>
+    /// Records a failed sync attempt.
+    /// </summary>
+    /// <param name="error">Error message to surface in the admin UI.</param>
+    /// <param name="durationMs">Sync duration in milliseconds.</param>
+    public void MarkSyncFailed(string error, long durationMs)
+    {
+        LastSyncAt = DateTime.UtcNow.ToString("O");
+        LastSyncStatus = "failed";
+        LastSyncError = error;
+        LastSyncDurationMs = durationMs;
     }
 }

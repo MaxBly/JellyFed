@@ -36,6 +36,12 @@ public class PeerConfiguration
     public bool SyncSeries { get; set; } = true;
 
     /// <summary>
+    /// Gets or sets a value indicating whether anime-classified items (movies or series
+    /// whose genres include an anime tag) should be synced from this peer.
+    /// </summary>
+    public bool SyncAnime { get; set; } = true;
+
+    /// <summary>
     /// Gets or sets the access token issued by this instance to this peer.
     /// The peer must present this token (not the global FederationToken) when
     /// querying our catalog. Null until the peer has completed auto-registration.

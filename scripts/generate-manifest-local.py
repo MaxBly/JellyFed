@@ -8,22 +8,36 @@ sans modifier le manifest versionné ni build-repo.sh.
 Ajoute des libellés « dev » (overview / changelog) pour distinguer le dépôt LAN
 dans l’interface Jellyfin — voir docs/dev-local-repo.md.
 
-Force la version catalogue de l’entrée la plus récente à 1.3.3.7. Un lien symbolique
-`repo/jellyfed_1.3.3.7.zip` → le ZIP réel du build permet d’aligner nom de fichier et
-numéro pour Nginx / le débogage ; le contenu du ZIP reste celui de build-repo.sh.
+Force la version catalogue de l’entrée la plus récente à `1.3.3.<epoch_seconds>`
+(strictement monotone à chaque build). Cela permet à Jellyfin de proposer
+l’upgrade à chaque `make dev`, même si le binaire du ZIP sous-jacent ne bump
+pas `build.yaml`. Un lien symbolique `repo/jellyfed_<version>.zip` pointe sur
+le ZIP réel pour aligner nom de fichier et numéro.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
 _DEV_OVERVIEW_PREFIX = "[Dépôt LAN · dev] "
 _DEV_CHANGELOG_PREFIX = "[Build locale] "
-# Version affichée dans Jellyfin pour le dépôt LAN uniquement (évite les collisions de numéro avec le dépôt public).
-_LOCAL_CATALOG_VERSION = "1.3.3.7"
+# Prefix fixe du schéma dev. Le dernier composant est l'epoch Unix (strictement croissant)
+# → chaque `make dev` produit une version plus grande que la précédente et Jellyfin propose
+# systématiquement l'upgrade, même sur une instance qui avait déjà installé une version dev.
+_LOCAL_VERSION_PREFIX = "1.3.3"
+
+
+def _compute_local_catalog_version() -> str:
+    """Version dev strictement monotone : `1.3.3.<epoch_seconds>`.
+
+    L'epoch Unix tient dans Int32 (max 2 147 483 647 ≈ année 2038), donc
+    System.Version (utilisé par Jellyfin) accepte sans débordement.
+    """
+    return f"{_LOCAL_VERSION_PREFIX}.{int(time.time())}"
 
 
 def _apply_dev_labels(plugin: dict, versions: list) -> None:
@@ -94,6 +108,10 @@ def main() -> int:
     # manifest.local.json sert uniquement au dépôt LAN : libellés explicites dans l’UI Jellyfin.
     _apply_dev_labels(plugin, versions)
 
+    # Version catalogue LAN (strictement monotone grâce à l'epoch) — calculée ici et réutilisée
+    # à la fois pour le champ `version`, le symlink et le changelog.
+    local_catalog_version = _compute_local_catalog_version()
+
     missing: list[str] = []
     for v in versions:
         if not isinstance(v, dict):
@@ -117,17 +135,29 @@ def main() -> int:
             print(f"  - {m}", file=sys.stderr)
 
     if versions and isinstance(versions[0], dict):
-        versions[0]["version"] = _LOCAL_CATALOG_VERSION
+        versions[0]["version"] = local_catalog_version
         v0 = versions[0]
         su0 = v0.get("sourceUrl")
         if isinstance(su0, str):
             path0 = urlparse(su0).path
             real_name = path0.rsplit("/", 1)[-1] if path0 else ""
-            alias_name = f"jellyfed_{_LOCAL_CATALOG_VERSION}.zip"
+            alias_name = f"jellyfed_{local_catalog_version}.zip"
             if real_name.endswith(".zip") and real_name != alias_name:
                 real_path = repo_dir / real_name
                 alias_path = repo_dir / alias_name
                 if real_path.is_file():
+                    # Purge des alias dev précédents (`jellyfed_1.3.3.<epoch>.zip` symlinks) pour
+                    # éviter qu'ils s'accumulent à chaque `make dev`. On ne touche qu'aux symlinks,
+                    # jamais aux ZIP réels produits par build-repo.sh.
+                    prefix = f"jellyfed_{_LOCAL_VERSION_PREFIX}."
+                    for old in repo_dir.glob("jellyfed_*.zip"):
+                        if old.name == alias_name or old.name == real_name:
+                            continue
+                        if old.is_symlink() and old.name.startswith(prefix):
+                            try:
+                                old.unlink()
+                            except OSError:
+                                pass
                     try:
                         if alias_path.exists() or alias_path.is_symlink():
                             alias_path.unlink()
@@ -160,7 +190,7 @@ def main() -> int:
                 except OSError:
                     pass
         v0["changelog"] = (
-            f"[Build locale] JellyFed {_LOCAL_CATALOG_VERSION} — "
+            f"[Build locale] JellyFed {local_catalog_version} — "
             f"binaire issu du ZIP jellyfed_{artifact_stem or '?'}.zip (build-repo.sh / build.yaml)."
         )
 
@@ -174,11 +204,15 @@ def main() -> int:
     print(f"Écrit : {dst}")
     print(
         f"Version(s) dans le manifest local : {vers_line}  "
-        f"(entrée la plus récente = {_LOCAL_CATALOG_VERSION} ; sourceUrl du ZIP → voir manifest)"
+        f"(entrée la plus récente = {local_catalog_version} ; sourceUrl du ZIP → voir manifest)"
     )
     print(
         "Overview [Dépôt LAN · dev] ; changelog entrée principale = version catalogue "
-        f"{_LOCAL_CATALOG_VERSION} + référence au ZIP de build."
+        f"{local_catalog_version} + référence au ZIP de build."
+    )
+    print(
+        "Version dev strictement monotone (epoch Unix en dernier composant) → chaque "
+        "`make dev` déclenche un upgrade côté Jellyfin même sans bump de build.yaml."
     )
     print(f"URL dépôt Jellyfin (à coller dans Dashboard → Plugins → Repositories) :")
     print(f"  {base}/manifest.local.json")
