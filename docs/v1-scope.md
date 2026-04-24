@@ -24,7 +24,7 @@ Tout ce qui suit constitue l'interface stable du plugin. Une fois v1 publiée, c
 | Format `.nfo` | XML, `<fileinfo><streamdetails>` | Rescan Jellyfin (perte métadonnées en attendant) |
 | Schema `.jellyfed-manifest.json` | JSON local au plugin | Perte de l'historique, pruning cassé |
 | Schema `PluginConfiguration` | XML interne Jellyfin | Reconfiguration manuelle des peers |
-| Routes API `/JellyFed/...` | HTTP inter-peers | Peers anciennes versions déconnectés |
+| Routes API `/JellyFed/v1/...` | HTTP inter-peers | Peers anciennes versions déconnectés |
 | DTOs catalogue (`CatalogItemDto`, `EpisodeDto`, `MediaStreamInfoDto`) | JSON wire format | Sync cross-version rompue |
 
 ---
@@ -39,6 +39,8 @@ Ajouter un champ `"schemaVersion": 1` dans :
 - `.jellyfed-manifest.json`
 - `PluginConfiguration` (sérialisé par Jellyfin)
 
+Ajouter aussi un `InstanceId` stable dans `PluginConfiguration`, généré une fois puis réutilisé pour les handshakes / diagnostics inter-peers.
+
 Mettre en place un `SchemaMigrator` capable de lire des schemas antérieurs et de les réécrire vers la version courante au démarrage du plugin. Sans ce mécanisme, toute évolution ultérieure du schéma (ex : nouveau champ dans `ManifestEntry`, nouveau champ de config peer) forcerait soit un reset, soit du code de migration ad hoc fragile.
 
 **Contrat posé :** chaque document stocké par le plugin porte un numéro de version. Toute version du plugin sait lire les versions antérieures (ou refuse de démarrer avec un message clair si la version est trop récente).
@@ -51,13 +53,13 @@ Préfixer toutes les routes du `FederationController` par `/JellyFed/v1/` :
 - `/JellyFed/v1/image/{id}/{type}`
 - `/JellyFed/v1/series/{id}/seasons`
 - `/JellyFed/v1/peer/register`
-- `/JellyFed/v1/peer/heartbeat`
+- `/JellyFed/v1/system/info`
 - `/JellyFed/v1/manifest/stats`
 - etc.
 
-Les routes `/JellyFed/...` (sans préfixe) restent alias vers `/JellyFed/v1/...` pendant la transition pour ne pas casser les peers déjà déployés.
+Les routes `/JellyFed/...` (sans préfixe de version) restent alias vers `/JellyFed/v1/...` pendant la transition pour ne pas casser les peers déjà déployés.
 
-Le `PeerClient` négocie la version lors du premier contact (champ `ProtocolVersion` déjà exposé dans le catalogue). Permet d'introduire plus tard un `/JellyFed/v2/` avec breaking changes, sans casser les peers v1.
+Le `PeerClient` négocie la version lors du premier contact via `GET /JellyFed/v1/system/info` (avec fallback legacy). Permet d'introduire plus tard un `/JellyFed/v2/` avec breaking changes, sans casser les peers v1.
 
 **Contrat posé :** les chemins HTTP `/JellyFed/v1/*` sont stables pour la durée de vie de v1.x. Les breaking changes vont dans `/v2/`.
 

@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
+using Jellyfin.Plugin.JellyFed;
 using MediaBrowser.Model.Plugins;
 
 namespace Jellyfin.Plugin.JellyFed.Configuration;
@@ -15,6 +16,8 @@ public class PluginConfiguration : BasePluginConfiguration
     /// </summary>
     public PluginConfiguration()
     {
+        SchemaVersion = FederationProtocol.CurrentSchemaVersion;
+        InstanceId = string.Empty;
         Peers = [];
         BlockedPeerUrls = [];
         SyncIntervalHours = 6;
@@ -27,6 +30,17 @@ public class PluginConfiguration : BasePluginConfiguration
         SeriesRootPath = string.Empty;
         AnimeRootPath = string.Empty;
     }
+
+    /// <summary>
+    /// Gets or sets the schema version of this persisted configuration document.
+    /// </summary>
+    public int SchemaVersion { get; set; }
+
+    /// <summary>
+    /// Gets or sets the stable local instance identifier used for federation handshakes.
+    /// Generated once and kept across upgrades.
+    /// </summary>
+    public string InstanceId { get; set; }
 
     /// <summary>
     /// Gets or sets the list of federated peers.

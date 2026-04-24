@@ -6,7 +6,7 @@ Un `.strm` est un fichier texte contenant une seule URL. Jellyfin le supporte na
 
 ```
 # Oppenheimer (2023).strm
-https://peer-b.example.com/JellyFed/stream/abc123def456?token=fed_token_xyz
+https://peer-b.example.com/JellyFed/v1/stream/abc123def456?token=fed_token_xyz
 ```
 
 Le token de fédération dans l'URL permet au serveur source d'authentifier la requête sans que la clé API Jellyfin n'apparaisse dans le fichier.
@@ -148,12 +148,12 @@ Les tags `jellyfed_peer` et `jellyfed_id` sont des extensions custom ignorées p
 ```
 1. Client Jellyfin appelle /Items/{id}/PlaybackInfo sur le serveur LOCAL
 2. Serveur local retourne MediaSource avec :
-   - Path = "https://peer-b/JellyFed/stream/abc123?token=..."
+   - Path = "https://peer-b/JellyFed/v1/stream/abc123?token=..."
    - MediaStreams = [video:hevc, audio:eac3/eng, audio:aac/fre, sub:eng, sub:fre]
 3. Client vérifie les capacités du navigateur vs codec détecté
 4a. H264/AAC → direct-play possible → URL envoyée directement au browser
 4b. HEVC/MKV → transcoding HLS requis → serveur local lance FFmpeg
-5. FFmpeg lit depuis https://peer-b/JellyFed/stream/abc123?token=...
+5. FFmpeg lit depuis https://peer-b/JellyFed/v1/stream/abc123?token=...
    → peer-b sert le fichier brut avec range request support (seekable)
    → FFmpeg transcode en H264/AAC → HLS segments
 6. Browser joue les segments HLS depuis le serveur LOCAL
@@ -184,7 +184,7 @@ JellyFed télécharge posters et backdrops lors de la sync et les stocke localem
 
 L'URL source dépend de la config :
 - `JellyfinApiKey` configurée → `/Items/{id}/Images/{type}?api_key={key}` (qualité native)
-- Sinon → `/JellyFed/image/{id}/{type}?token={fedToken}` (proxy, lit `ImageInfos`)
+- Sinon → `/JellyFed/v1/image/{id}/{type}?token={fedToken}` (proxy, lit `ImageInfos`)
 
 ---
 

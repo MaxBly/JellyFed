@@ -1,7 +1,7 @@
 namespace Jellyfin.Plugin.JellyFed.Api.Dto;
 
 /// <summary>
-/// Response returned by <c>POST /JellyFed/peer/register</c>.
+/// Response returned by <c>POST /JellyFed/v1/peer/register</c>.
 /// </summary>
 public class RegisterPeerResponseDto
 {

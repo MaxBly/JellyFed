@@ -5,11 +5,11 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net.Mime;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Data.Enums;
 using Jellyfin.Database.Implementations.Enums;
+using Jellyfin.Plugin.JellyFed;
 using Jellyfin.Plugin.JellyFed.Api.Dto;
 using Jellyfin.Plugin.JellyFed.Configuration;
 using Jellyfin.Plugin.JellyFed.Sync;
@@ -28,15 +28,11 @@ namespace Jellyfin.Plugin.JellyFed.Api;
 /// JellyFed federation API endpoints.
 /// </summary>
 [ApiController]
-[Route("JellyFed")]
+[Route(FederationProtocol.LegacyRoutePrefix)]
+[Route(FederationProtocol.V1RoutePrefix)]
 [Produces(MediaTypeNames.Application.Json)]
 public class FederationController : ControllerBase
 {
-    private static readonly JsonSerializerOptions ManifestJsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-    };
-
     private readonly ILibraryManager _libraryManager;
     private readonly ITaskManager _taskManager;
     private readonly FederationSyncTask _syncTask;
@@ -79,6 +75,34 @@ public class FederationController : ControllerBase
             version = Plugin.Instance?.Version.ToString(3) ?? "unknown",
             name = "JellyFed",
             status = "ok"
+        });
+    }
+
+    /// <summary>
+    /// Returns handshake-oriented system information for federation peers.
+    /// </summary>
+    /// <returns>Stable instance ID, schema/protocol versions, route prefixes and capabilities.</returns>
+    [HttpGet("system/info")]
+    [AllowAnonymous]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public ActionResult<FederationSystemInfoDto> GetSystemInfo()
+    {
+        var config = Plugin.Instance?.Configuration;
+        var serverName = string.IsNullOrWhiteSpace(config?.SelfName)
+            ? Plugin.Instance?.Name ?? "JellyFed"
+            : config.SelfName;
+
+        return Ok(new FederationSystemInfoDto
+        {
+            Name = Plugin.Instance?.Name ?? "JellyFed",
+            Version = Plugin.Instance?.Version.ToString(3) ?? "unknown",
+            InstanceId = config?.InstanceId,
+            ServerName = serverName,
+            ProtocolVersion = FederationProtocol.CurrentProtocolVersion,
+            SchemaVersion = config?.SchemaVersion ?? FederationProtocol.CurrentSchemaVersion,
+            PreferredRoutePrefix = FederationProtocol.V1RoutePrefixPath,
+            RoutePrefixes = FederationProtocol.SupportedRoutePrefixes,
+            Capabilities = FederationProtocol.Capabilities
         });
     }
 
@@ -128,7 +152,7 @@ public class FederationController : ControllerBase
         var page = items.Skip(offset).Take(limit).ToArray();
 
         _logger.LogInformation(
-            "GET /JellyFed/catalog — {Total} items (type={Type}, since={Since})",
+            "GET /JellyFed/v1/catalog — {Total} items (type={Type}, since={Since})",
             items.Count,
             type ?? "all",
             since ?? "all");
@@ -204,7 +228,7 @@ public class FederationController : ControllerBase
                     StillUrl = HasImage(ep, ImageType.Primary)
                         ? ImageUrl(baseUrl, ep.Id, "Primary", token, apiKey)
                         : null,
-                    StreamUrl = $"{baseUrl}/JellyFed/stream/{ep.Id:N}?token={token}",
+                    StreamUrl = $"{baseUrl}{FederationProtocol.ToV1Path($"stream/{ep.Id:N}")}?token={token}",
                     Container = epInfo.Container,
                     VideoCodec = epInfo.VideoCodec,
                     Width = epInfo.Width,
@@ -218,7 +242,7 @@ public class FederationController : ControllerBase
         }
 
         _logger.LogInformation(
-            "GET /JellyFed/catalog/series/{SeriesId}/seasons — {SeasonCount} seasons",
+            "GET /JellyFed/v1/catalog/series/{SeriesId}/seasons — {SeasonCount} seasons",
             seriesId,
             response.Seasons.Count);
 
@@ -287,7 +311,7 @@ public class FederationController : ControllerBase
                     ? ImageUrl(baseUrl, item.Id, "Backdrop", token, apiKey)
                     : null,
                 StreamUrl = kind == BaseItemKind.Movie
-                    ? $"{baseUrl}/JellyFed/stream/{item.Id:N}?token={token}"
+                    ? $"{baseUrl}{FederationProtocol.ToV1Path($"stream/{item.Id:N}")}?token={token}"
                     : null,
                 AddedAt = item.DateCreated.ToString("O", CultureInfo.InvariantCulture),
                 UpdatedAt = item.DateModified.ToString("O", CultureInfo.InvariantCulture),
@@ -494,7 +518,7 @@ public class FederationController : ControllerBase
             return Ok(new ManifestStatsDto());
         }
 
-        var manifest = ReadManifest(config.LibraryPath);
+        var manifest = ManifestStore.Load(config.LibraryPath);
 
         var stats = new Dictionary<string, PeerCatalogStatsDto>(StringComparer.Ordinal);
 
@@ -547,7 +571,7 @@ public class FederationController : ControllerBase
             return BadRequest("LibraryPath is not configured.");
         }
 
-        var manifest = ReadManifest(config.LibraryPath);
+        var manifest = ManifestStore.Load(config.LibraryPath);
         var name = request.PeerName;
 
         var movieKeys = manifest.Movies
@@ -587,7 +611,7 @@ public class FederationController : ControllerBase
             manifest.Series.Remove(key);
         }
 
-        WriteManifest(config.LibraryPath, manifest);
+        ManifestStore.Save(config.LibraryPath, manifest);
 
         // Remove items from Jellyfin's library index so they disappear immediately
         // without waiting for a scheduled scan.
@@ -629,7 +653,7 @@ public class FederationController : ControllerBase
 
         var manifest = string.IsNullOrWhiteSpace(libraryPath)
             ? new Manifest()
-            : ReadManifest(libraryPath);
+            : ManifestStore.Load(libraryPath);
 
         var moviesRoot = config.GetEffectiveMoviesRoot();
         var seriesRoot = config.GetEffectiveSeriesRoot();
@@ -1249,7 +1273,7 @@ public class FederationController : ControllerBase
         {
             try
             {
-                var manifest = ReadManifest(libraryPath);
+                var manifest = ManifestStore.Load(libraryPath);
                 var allPaths = manifest.Movies.Values.Select(e => e.Path)
                     .Concat(manifest.Series.Values.Select(e => e.Path))
                     .ToList();
@@ -1459,7 +1483,7 @@ public class FederationController : ControllerBase
     private static string ImageUrl(string baseUrl, Guid itemId, string imageType, string token, string? apiKey)
         => !string.IsNullOrWhiteSpace(apiKey)
             ? $"{baseUrl}/Items/{itemId:N}/Images/{imageType}?api_key={apiKey}"
-            : $"{baseUrl}/JellyFed/image/{itemId:N}/{imageType}?token={token}";
+            : $"{baseUrl}{FederationProtocol.ToV1Path($"image/{itemId:N}/{imageType}")}?token={token}";
 
     private static bool ValidateStreamToken(string? token)
     {
@@ -1486,31 +1510,6 @@ public class FederationController : ControllerBase
             ".webm" => "video/webm",
             _ => "application/octet-stream"
         };
-    }
-
-    private static Manifest ReadManifest(string libraryPath)
-    {
-        var path = Path.Combine(libraryPath, ".jellyfed-manifest.json");
-        if (!System.IO.File.Exists(path))
-        {
-            return new Manifest();
-        }
-
-        try
-        {
-            var json = System.IO.File.ReadAllText(path);
-            return JsonSerializer.Deserialize<Manifest>(json, ManifestJsonOptions) ?? new Manifest();
-        }
-        catch
-        {
-            return new Manifest();
-        }
-    }
-
-    private static void WriteManifest(string libraryPath, Manifest manifest)
-    {
-        var path = Path.Combine(libraryPath, ".jellyfed-manifest.json");
-        System.IO.File.WriteAllText(path, JsonSerializer.Serialize(manifest, ManifestJsonOptions));
     }
 
     private static string? CombinePeerFolder(string root, string peerSeg)
@@ -1580,7 +1579,7 @@ public class FederationController : ControllerBase
     [SuppressMessage("Security", "CA3003:Review code for file path injection vulnerabilities", Justification = "Paths come from the plugin manifest written by this plugin and admin-configured roots.")]
     private (int DeletedMovies, int DeletedSeries) PurgePeerData(PluginConfiguration config, string peerName)
     {
-        var manifest = ReadManifest(config.LibraryPath);
+        var manifest = ManifestStore.Load(config.LibraryPath);
 
         var movieKeys = manifest.Movies
             .Where(kv => string.Equals(kv.Value.PeerName, peerName, StringComparison.OrdinalIgnoreCase))
@@ -1618,7 +1617,7 @@ public class FederationController : ControllerBase
             manifest.Series.Remove(key);
         }
 
-        WriteManifest(config.LibraryPath, manifest);
+        ManifestStore.Save(config.LibraryPath, manifest);
         RemoveLibraryItems(deletedPaths);
         FederatedPathHelper.TryDeletePeerContentFolders(config, peerName);
 
@@ -1691,7 +1690,7 @@ public class FederationController : ControllerBase
         }
 
         // Rewrite manifest paths and PeerName for every entry of the old peer.
-        var manifest = ReadManifest(config.LibraryPath);
+        var manifest = ManifestStore.Load(config.LibraryPath);
         bool manifestChanged = false;
 
         foreach (var dict in new[] { manifest.Movies, manifest.Series })
@@ -1721,7 +1720,7 @@ public class FederationController : ControllerBase
 
         if (manifestChanged)
         {
-            WriteManifest(config.LibraryPath, manifest);
+            ManifestStore.Save(config.LibraryPath, manifest);
         }
 
         // Rename the PeerStateStore key so UI stats survive the rename.

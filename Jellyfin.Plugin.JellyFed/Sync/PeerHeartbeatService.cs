@@ -1,7 +1,4 @@
 using System;
-using System.Net.Http;
-using System.Net.Http.Headers;
-using System.Net.Http.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
@@ -17,7 +14,7 @@ public class PeerHeartbeatService : IHostedService, IDisposable
 {
     private const int HeartbeatIntervalMinutes = 5;
 
-    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly PeerClient _peerClient;
     private readonly ILogger<PeerHeartbeatService> _logger;
     private Timer? _timer;
     private bool _disposed;
@@ -25,11 +22,11 @@ public class PeerHeartbeatService : IHostedService, IDisposable
     /// <summary>
     /// Initializes a new instance of the <see cref="PeerHeartbeatService"/> class.
     /// </summary>
-    /// <param name="httpClientFactory">Instance of <see cref="IHttpClientFactory"/>.</param>
+    /// <param name="peerClient">Federation HTTP client with route-version fallback support.</param>
     /// <param name="logger">Instance of the <see cref="ILogger{PeerHeartbeatService}"/> interface.</param>
-    public PeerHeartbeatService(IHttpClientFactory httpClientFactory, ILogger<PeerHeartbeatService> logger)
+    public PeerHeartbeatService(PeerClient peerClient, ILogger<PeerHeartbeatService> logger)
     {
-        _httpClientFactory = httpClientFactory;
+        _peerClient = peerClient;
         _logger = logger;
     }
 
@@ -88,7 +85,6 @@ public class PeerHeartbeatService : IHostedService, IDisposable
         }
 
         var states = PeerStateStore.Load(config.LibraryPath);
-        var http = _httpClientFactory.CreateClient("JellyFed");
         bool changed = false;
 
         foreach (var peer in config.Peers)
@@ -106,30 +102,25 @@ public class PeerHeartbeatService : IHostedService, IDisposable
 
             try
             {
-                var url = peer.Url.TrimEnd('/') + "/JellyFed/health";
-                using var request = new HttpRequestMessage(HttpMethod.Get, url);
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", peer.FederationToken);
+                var info = await _peerClient
+                    .GetSystemInfoAsync(peer.Url, peer.FederationToken, cancellationToken)
+                    .ConfigureAwait(false);
 
-                using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                cts.CancelAfter(TimeSpan.FromSeconds(10));
-
-                using var response = await http.SendAsync(request, cts.Token).ConfigureAwait(false);
-
-                if (response.IsSuccessStatusCode)
+                if (info is not null)
                 {
-                    var health = await response.Content
-                        .ReadFromJsonAsync<HealthResponse>(cts.Token)
-                        .ConfigureAwait(false);
-
-                    status.MarkOnline(health?.Version ?? string.Empty, status.MovieCount, status.SeriesCount);
-                    _logger.LogDebug("JellyFed heartbeat: {PeerName} online (v{Version}).", peer.Name, health?.Version);
+                    status.MarkOnline(info.Version, status.MovieCount, status.SeriesCount);
+                    _logger.LogDebug(
+                        "JellyFed heartbeat: {PeerName} online (v{Version}, route={Route}).",
+                        peer.Name,
+                        info.Version,
+                        info.PreferredRoutePrefix);
                 }
                 else
                 {
                     status.MarkOffline();
                 }
             }
-            catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or TaskCanceledException)
+            catch (Exception ex) when (ex is OperationCanceledException or TaskCanceledException)
             {
                 status.MarkOffline();
                 _logger.LogDebug("JellyFed heartbeat: {PeerName} unreachable — {Message}", peer.Name, ex.Message);
@@ -142,10 +133,5 @@ public class PeerHeartbeatService : IHostedService, IDisposable
         {
             PeerStateStore.Save(config.LibraryPath, states);
         }
-    }
-
-    private sealed class HealthResponse
-    {
-        public string? Version { get; set; }
     }
 }

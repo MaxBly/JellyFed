@@ -3,7 +3,7 @@ using System.Collections.Generic;
 namespace Jellyfin.Plugin.JellyFed.Api.Dto;
 
 /// <summary>
-/// Response envelope for the /JellyFed/catalog endpoint.
+/// Response envelope for the /JellyFed/v1/catalog endpoint.
 /// </summary>
 public class CatalogResponseDto
 {

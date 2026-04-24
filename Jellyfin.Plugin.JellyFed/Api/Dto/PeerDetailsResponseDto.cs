@@ -3,7 +3,7 @@ using System.Collections.Generic;
 namespace Jellyfin.Plugin.JellyFed.Api.Dto;
 
 /// <summary>
-/// Response envelope for GET /JellyFed/peers/details.
+/// Response envelope for GET /JellyFed/v1/peers/details.
 /// </summary>
 public class PeerDetailsResponseDto
 {

@@ -1,7 +1,7 @@
 namespace Jellyfin.Plugin.JellyFed.Api.Dto;
 
 /// <summary>
-/// Request body for POST /JellyFed/peer/register.
+/// Request body for POST /JellyFed/v1/peer/register.
 /// Sent by a remote instance that wants to federate with this one.
 /// </summary>
 public class RegisterPeerRequestDto

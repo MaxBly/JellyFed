@@ -1,7 +1,7 @@
 namespace Jellyfin.Plugin.JellyFed.Api.Dto;
 
 /// <summary>
-/// Partial update payload for PATCH /JellyFed/peer/{name}.
+/// Partial update payload for PATCH /JellyFed/v1/peer/{name}.
 /// All fields are optional — only properties that are not null are applied.
 /// </summary>
 public class UpdatePeerRequestDto

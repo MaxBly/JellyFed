@@ -1,7 +1,7 @@
 namespace Jellyfin.Plugin.JellyFed.Api.Dto;
 
 /// <summary>
-/// Request body for POST /JellyFed/peer/sync.
+/// Request body for POST /JellyFed/v1/peer/sync.
 /// </summary>
 public class SyncPeerRequestDto
 {

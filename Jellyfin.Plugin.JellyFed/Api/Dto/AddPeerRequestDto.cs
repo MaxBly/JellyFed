@@ -1,7 +1,7 @@
 namespace Jellyfin.Plugin.JellyFed.Api.Dto;
 
 /// <summary>
-/// Request payload for POST /JellyFed/peers (add a peer from the admin UI).
+/// Request payload for POST /JellyFed/v1/peers (add a peer from the admin UI).
 /// </summary>
 public class AddPeerRequestDto
 {

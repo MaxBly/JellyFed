@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Data.Enums;
@@ -33,12 +32,6 @@ public class FederationSyncTask : IScheduledTask
     private readonly PeerClient _peerClient;
     private readonly StrmWriter _strmWriter;
     private readonly ILogger<FederationSyncTask> _logger;
-
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        WriteIndented = true,
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-    };
 
     /// <summary>
     /// Initializes a new instance of the <see cref="FederationSyncTask"/> class.
@@ -101,7 +94,7 @@ public class FederationSyncTask : IScheduledTask
 
         Directory.CreateDirectory(libraryPath);
 
-        var manifest = LoadManifest(libraryPath);
+        var manifest = ManifestStore.Load(libraryPath);
         var localTmdbIds = BuildLocalTmdbIds(config);
         var states = PeerStateStore.Load(libraryPath);
 
@@ -155,7 +148,7 @@ public class FederationSyncTask : IScheduledTask
         PruneDeleted(manifest.Movies, allSeenMovieKeys);
         PruneDeleted(manifest.Series, allSeenSeriesKeys);
 
-        SaveManifest(libraryPath, manifest);
+        ManifestStore.Save(libraryPath, manifest);
         PeerStateStore.Save(libraryPath, states);
 
         progress.Report(95);
@@ -186,7 +179,7 @@ public class FederationSyncTask : IScheduledTask
         }
 
         Directory.CreateDirectory(config.LibraryPath);
-        var manifest = LoadManifest(config.LibraryPath);
+        var manifest = ManifestStore.Load(config.LibraryPath);
         var localTmdbIds = BuildLocalTmdbIds(config);
         var states = PeerStateStore.Load(config.LibraryPath);
 
@@ -223,7 +216,7 @@ public class FederationSyncTask : IScheduledTask
             status.MarkSyncFailed(result.Error, result.DurationMs);
         }
 
-        SaveManifest(config.LibraryPath, manifest);
+        ManifestStore.Save(config.LibraryPath, manifest);
         PeerStateStore.Save(config.LibraryPath, states);
 
         _libraryManager.QueueLibraryScan();
@@ -509,33 +502,5 @@ public class FederationSyncTask : IScheduledTask
         return string.IsNullOrEmpty(tmdbId)
             ? $"no-tmdb:{p}:{jellyfinId}"
             : $"tmdb:{tmdbId}:{p}";
-    }
-
-    private static Manifest LoadManifest(string libraryPath)
-    {
-        var path = Path.Combine(libraryPath, ManifestFileName);
-        if (!File.Exists(path))
-        {
-            return new Manifest();
-        }
-
-        try
-        {
-            var json = File.ReadAllText(path);
-            return JsonSerializer.Deserialize<Manifest>(json, JsonOptions) ?? new Manifest();
-        }
-#pragma warning disable CA1031 // Intentionally broad: corrupt manifest must not crash sync.
-        catch
-        {
-            return new Manifest();
-        }
-#pragma warning restore CA1031
-    }
-
-    private static void SaveManifest(string libraryPath, Manifest manifest)
-    {
-        var path = Path.Combine(libraryPath, ManifestFileName);
-        var json = JsonSerializer.Serialize(manifest, JsonOptions);
-        File.WriteAllText(path, json);
     }
 }

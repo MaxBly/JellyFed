@@ -22,7 +22,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
             });
 
         serviceCollection.AddScoped<FederationAuthFilter>();
-        serviceCollection.AddScoped<PeerClient>();
+        serviceCollection.AddSingleton<PeerClient>();
         serviceCollection.AddScoped<StrmWriter>();
         serviceCollection.AddScoped<FederationSyncTask>();
 

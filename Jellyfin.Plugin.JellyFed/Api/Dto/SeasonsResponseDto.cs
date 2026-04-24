@@ -3,7 +3,7 @@ using System.Collections.ObjectModel;
 namespace Jellyfin.Plugin.JellyFed.Api.Dto;
 
 /// <summary>
-/// Response envelope for the /JellyFed/catalog/series/{id}/seasons endpoint.
+/// Response envelope for the /JellyFed/v1/catalog/series/{id}/seasons endpoint.
 /// </summary>
 public class SeasonsResponseDto
 {

@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
+using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -42,26 +44,23 @@ public class PeerClient
         DateTime? since,
         CancellationToken cancellationToken)
     {
-        var url = BuildUrl(peer, "/JellyFed/catalog");
+        var suffix = "/catalog";
         if (since.HasValue)
         {
-            url += $"?since={Uri.EscapeDataString(since.Value.ToString("O"))}";
+            suffix += $"?since={Uri.EscapeDataString(since.Value.ToString("O"))}";
         }
 
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, url);
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", peer.FederationToken);
-
-            using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
-            response.EnsureSuccessStatusCode();
-
-            return await response.Content.ReadFromJsonAsync<CatalogResponseDto>(cancellationToken)
-                .ConfigureAwait(false);
+            return await GetJsonWithRouteFallbackAsync<CatalogResponseDto>(
+                peer.Url,
+                peer.FederationToken,
+                suffix,
+                cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to fetch catalog from peer {PeerName} ({Url})", peer.Name, url);
+            _logger.LogError(ex, "Failed to fetch catalog from peer {PeerName} ({Url})", peer.Name, peer.Url);
             return null;
         }
     }
@@ -78,18 +77,13 @@ public class PeerClient
         string seriesId,
         CancellationToken cancellationToken)
     {
-        var url = BuildUrl(peer, $"/JellyFed/catalog/series/{seriesId}/seasons");
-
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, url);
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", peer.FederationToken);
-
-            using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
-            response.EnsureSuccessStatusCode();
-
-            return await response.Content.ReadFromJsonAsync<SeasonsResponseDto>(cancellationToken)
-                .ConfigureAwait(false);
+            return await GetJsonWithRouteFallbackAsync<SeasonsResponseDto>(
+                peer.Url,
+                peer.FederationToken,
+                $"/catalog/series/{seriesId}/seasons",
+                cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -99,7 +93,73 @@ public class PeerClient
     }
 
     /// <summary>
-    /// Pings a peer's /JellyFed/health endpoint with the provided URL + token.
+    /// Pings a peer and returns its JellyFed system information when reachable.
+    /// Falls back to the legacy unversioned health endpoint for older peers.
+    /// </summary>
+    /// <param name="url">Peer base URL.</param>
+    /// <param name="federationToken">Federation token to present in the Bearer header.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The remote system info, or <see langword="null"/> when unreachable.</returns>
+    public async Task<FederationSystemInfoDto?> GetSystemInfoAsync(
+        string url,
+        string? federationToken,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return null;
+        }
+
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cts.CancelAfter(TimeSpan.FromSeconds(10));
+
+        try
+        {
+            var info = await GetJsonAsync<FederationSystemInfoDto>(
+                url,
+                federationToken,
+                [
+                    FederationProtocol.ToV1Path("system/info"),
+                    FederationProtocol.ToLegacyPath("system/info")
+                ],
+                cts.Token).ConfigureAwait(false);
+
+            if (info is not null)
+            {
+                NormalizeSystemInfo(info);
+                return info;
+            }
+
+            var health = await GetJsonAsync<HealthDto>(
+                url,
+                federationToken,
+                [FederationProtocol.ToLegacyPath("health")],
+                cts.Token).ConfigureAwait(false);
+
+            if (health is null)
+            {
+                return null;
+            }
+
+            return new FederationSystemInfoDto
+            {
+                Name = string.IsNullOrWhiteSpace(health.Name) ? "JellyFed" : health.Name,
+                Version = health.Version ?? string.Empty,
+                PreferredRoutePrefix = FederationProtocol.LegacyRoutePrefixPath,
+                RoutePrefixes = [FederationProtocol.LegacyRoutePrefixPath],
+                Capabilities = ["legacy-route-aliases"]
+            };
+        }
+#pragma warning disable CA1031 // Handshake is best-effort; any failure is reported as unreachable.
+        catch
+        {
+            return null;
+        }
+#pragma warning restore CA1031
+    }
+
+    /// <summary>
+    /// Pings a peer's health/system-info endpoint with the provided URL + token.
     /// Used by the admin UI when adding or editing a peer, so misconfiguration shows up immediately.
     /// </summary>
     /// <param name="url">Peer base URL.</param>
@@ -111,40 +171,8 @@ public class PeerClient
         string federationToken,
         CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(url))
-        {
-            return (false, null);
-        }
-
-        var healthUrl = url.TrimEnd('/') + "/JellyFed/health";
-        try
-        {
-            using var request = new HttpRequestMessage(HttpMethod.Get, healthUrl);
-            if (!string.IsNullOrWhiteSpace(federationToken))
-            {
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", federationToken);
-            }
-
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            cts.CancelAfter(TimeSpan.FromSeconds(10));
-
-            using var response = await _http.SendAsync(request, cts.Token).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode)
-            {
-                return (false, null);
-            }
-
-            var health = await response.Content
-                .ReadFromJsonAsync<HealthDto>(cts.Token)
-                .ConfigureAwait(false);
-            return (true, health?.Version);
-        }
-#pragma warning disable CA1031 // Health-check is best-effort; surface any failure as "unreachable".
-        catch
-        {
-            return (false, null);
-        }
-#pragma warning restore CA1031
+        var info = await GetSystemInfoAsync(url, federationToken, cancellationToken).ConfigureAwait(false);
+        return (info is not null, info?.Version);
     }
 
     /// <summary>
@@ -193,34 +221,30 @@ public class PeerClient
         string selfToken,
         CancellationToken cancellationToken)
     {
-        var url = BuildUrl(peer, "/JellyFed/peer/register");
         try
         {
-            var payload = new Api.Dto.RegisterPeerRequestDto
+            var payload = new RegisterPeerRequestDto
             {
                 Name = selfName,
                 Url = selfUrl,
                 FederationToken = selfToken
             };
-            using var request = new HttpRequestMessage(HttpMethod.Post, url);
-            request.Content = System.Net.Http.Json.JsonContent.Create(payload);
-            using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
-            _logger.LogInformation("JellyFed: registered on peer {PeerName} — HTTP {Status}", peer.Name, (int)response.StatusCode);
 
-            if (!response.IsSuccessStatusCode)
+            var result = await PostJsonWithRouteFallbackAsync<RegisterPeerResponseDto>(
+                peer.Url,
+                null,
+                "/peer/register",
+                payload,
+                cancellationToken).ConfigureAwait(false);
+
+            if (result is null)
             {
                 return;
             }
 
-            // If the peer issued a per-peer access token, store it as our FederationToken
-            // for that peer. From now on this token (not the global one) is used for all
-            // API calls to that peer, and can be revoked by the peer on their end.
-            var result = await response.Content
-                .ReadFromJsonAsync<Api.Dto.RegisterPeerResponseDto>(cancellationToken)
-                .ConfigureAwait(false);
+            _logger.LogInformation("JellyFed: registered on peer {PeerName}.", peer.Name);
 
-            if (result is null ||
-                string.IsNullOrEmpty(result.AccessToken) ||
+            if (string.IsNullOrEmpty(result.AccessToken) ||
                 !string.Equals(result.Status, "ok", StringComparison.Ordinal))
             {
                 return;
@@ -251,14 +275,119 @@ public class PeerClient
         }
     }
 
-    private static string BuildUrl(PeerConfiguration peer, string path)
+    private async Task<T?> GetJsonWithRouteFallbackAsync<T>(
+        string baseUrl,
+        string? bearerToken,
+        string suffix,
+        CancellationToken cancellationToken)
     {
-        var baseUrl = peer.Url.TrimEnd('/');
-        return baseUrl + path;
+        return await GetJsonAsync<T>(
+            baseUrl,
+            bearerToken,
+            [
+                FederationProtocol.ToV1Path(suffix),
+                FederationProtocol.ToLegacyPath(suffix)
+            ],
+            cancellationToken).ConfigureAwait(false);
     }
+
+    private async Task<T?> GetJsonAsync<T>(
+        string baseUrl,
+        string? bearerToken,
+        IReadOnlyList<string> candidatePaths,
+        CancellationToken cancellationToken)
+    {
+        for (var i = 0; i < candidatePaths.Count; i++)
+        {
+            var path = candidatePaths[i];
+            using var request = new HttpRequestMessage(HttpMethod.Get, BuildUrl(baseUrl, path));
+            ApplyBearer(request, bearerToken);
+
+            using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            if (response.StatusCode == HttpStatusCode.NotFound && i < candidatePaths.Count - 1)
+            {
+                continue;
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                return default;
+            }
+
+            return await response.Content.ReadFromJsonAsync<T>(cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        return default;
+    }
+
+    private async Task<TResponse?> PostJsonWithRouteFallbackAsync<TResponse>(
+        string baseUrl,
+        string? bearerToken,
+        string suffix,
+        object payload,
+        CancellationToken cancellationToken)
+    {
+        var candidatePaths = new[]
+        {
+            FederationProtocol.ToV1Path(suffix),
+            FederationProtocol.ToLegacyPath(suffix)
+        };
+
+        for (var i = 0; i < candidatePaths.Length; i++)
+        {
+            var path = candidatePaths[i];
+            using var request = new HttpRequestMessage(HttpMethod.Post, BuildUrl(baseUrl, path))
+            {
+                Content = JsonContent.Create(payload)
+            };
+            ApplyBearer(request, bearerToken);
+
+            using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            if (response.StatusCode == HttpStatusCode.NotFound && i < candidatePaths.Length - 1)
+            {
+                continue;
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                return default;
+            }
+
+            return await response.Content.ReadFromJsonAsync<TResponse>(cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        return default;
+    }
+
+    private static void NormalizeSystemInfo(FederationSystemInfoDto info)
+    {
+        info.Name = string.IsNullOrWhiteSpace(info.Name) ? "JellyFed" : info.Name;
+        info.PreferredRoutePrefix = string.IsNullOrWhiteSpace(info.PreferredRoutePrefix)
+            ? FederationProtocol.V1RoutePrefixPath
+            : info.PreferredRoutePrefix;
+        info.RoutePrefixes = info.RoutePrefixes is null || info.RoutePrefixes.Count == 0
+            ? [info.PreferredRoutePrefix]
+            : info.RoutePrefixes;
+        info.Capabilities ??= [];
+    }
+
+    private static void ApplyBearer(HttpRequestMessage request, string? bearerToken)
+    {
+        if (!string.IsNullOrWhiteSpace(bearerToken))
+        {
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearerToken);
+        }
+    }
+
+    private static string BuildUrl(string baseUrl, string path)
+        => baseUrl.TrimEnd('/') + path;
 
     private sealed class HealthDto
     {
+        public string? Name { get; set; }
+
         public string? Version { get; set; }
     }
 }

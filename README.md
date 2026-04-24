@@ -25,9 +25,9 @@ Instance A installe JellyFed. Elle se connecte à l'Instance B. Le plugin synchr
 ## Fonctionnalités
 
 ### Catalogue & streaming
-- Exposition du catalogue local via `GET /JellyFed/catalog` (films + séries + codec info)
-- Proxy stream `/JellyFed/stream/{id}?token=...` — aucune clé API dans les `.strm`
-- Proxy image `/JellyFed/image/{id}/{type}?token=...` — fallback si pas de `JellyfinApiKey`
+- Exposition du catalogue local via `GET /JellyFed/v1/catalog` (films + séries + codec info)
+- Proxy stream `/JellyFed/v1/stream/{id}?token=...` — aucune clé API dans les `.strm`
+- Proxy image `/JellyFed/v1/image/{id}/{type}?token=...` — fallback si pas de `JellyfinApiKey`
 - Infos codec + toutes les pistes audio/sous-titres exposées dans le catalogue
 - Décision transcodage HLS correcte grâce aux infos `<fileinfo><streamdetails>` dans les NFO
 - Seeking fonctionnel (range requests sur le fichier source)
@@ -41,6 +41,7 @@ Instance A installe JellyFed. Elle se connecte à l'Instance B. Le plugin synchr
 - Rescan Jellyfin déclenché après chaque sync
 
 ### Gestion des peers
+- Endpoint handshake `GET /JellyFed/v1/system/info` (version, protocolVersion, schemaVersion, instanceId, capabilities)
 - Onglet dédié « Peers » dans la page de configuration (Readme / Settings / Peers / Danger Zone)
 - Cartes par peer avec statut online/offline, version, dernière sync (badge ok/failed/never + erreur), durée
 - Compteurs synced par peer : catalogue distant (films / séries) vs local (films / séries / anime) + disque utilisé
@@ -52,6 +53,7 @@ Instance A installe JellyFed. Elle se connecte à l'Instance B. Le plugin synchr
 
 ### Sécurité
 - Token de fédération auto-généré au démarrage (non éditable)
+- `InstanceId` stable auto-généré côté config pour les handshakes / diagnostics inter-peers
 - Clé API Jellyfin optionnelle (`JellyfinApiKey`) — reste côté serveur, jamais dans les `.strm`
 - Bouton "Reset Network" : nouveau token + suppression de tous les peers et `.strm`
 - `X-Forwarded-Proto` respecté derrière un reverse proxy
@@ -93,6 +95,7 @@ Puis installez JellyFed depuis le catalogue.
 
 ```
 Federation Token : <auto-généré>
+Instance ID      : <auto-généré, stable>
 Instance Name    : mon-serveur
 Self URL         : https://mon-jellyfin.example.com
 Sync Interval    : 6 (heures)

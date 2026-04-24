@@ -41,7 +41,7 @@ Le plan détaillé de la v1 (contrats à figer, motivations, critères de valida
 
 ```
 P1  Versioning config + manifest (v0.1.0.16)          — prérequis migrations
-P2  Versioning API /JellyFed/v1/ (v0.1.0.17)          — prérequis coexistence v1/v2
+P2  Versioning API /JellyFed/v1/ (v0.1.0.17)             — prérequis coexistence v1/v2
 P3  Migration legacy layout + gel du layout par peer  — sécuriser l'upgrade depuis l'ancien layout plat
 P4  Multi-source sources.json (v0.1.0.19)             — nouveau fichier par item
 P5  Tag <studio> peer + fix SRT BUG-05 (v0.1.0.20)    — format NFO final
@@ -125,7 +125,7 @@ Post-v1 (non-breaking, safe à ajouter en v1.x) : UI refonte, peer-of-peer disco
 
 #### TEST-02 — Accès au catalogue révoqué après suppression peer
 **À vérifier :**
-- Après que A supprime B, appeler `GET /JellyFed/catalog` sur A avec l'ancien token de B
+- Après que A supprime B, appeler `GET /JellyFed/v1/catalog` sur A avec l'ancien token de B
 - **Critère de succès :** `401 Unauthorized`
 
 #### TEST-03 — Auto-registration bidirectionnelle
@@ -139,7 +139,7 @@ Post-v1 (non-breaking, safe à ajouter en v1.x) : UI refonte, peer-of-peer disco
 ### Images & URLs
 
 #### TEST-17 — Images via proxy JellyFed (sans JellyfinApiKey)
-**Contexte :** `JellyfinApiKey` non configurée → URLs `/JellyFed/image/{id}/{type}?token=...`
+**Contexte :** `JellyfinApiKey` non configurée → URLs `/JellyFed/v1/image/{id}/{type}?token=...`
 **À vérifier :**
 - Les posters s'affichent dans Jellyfin (en local depuis le disque — téléchargés à la sync)
 - Les backdrops s'affichent
@@ -156,7 +156,7 @@ Post-v1 (non-breaking, safe à ajouter en v1.x) : UI refonte, peer-of-peer disco
 **Contexte :** Jellyfin derrière un reverse proxy nginx avec TLS.
 **À vérifier :**
 - Les URLs générées dans le catalogue utilisent `https://` (pas `http://`)
-- Vérifier dans `GET /JellyFed/catalog` que `streamUrl`, `posterUrl`, `backdropUrl` commencent par `https://`
+- Vérifier dans `GET /JellyFed/v1/catalog` que `streamUrl`, `posterUrl`, `backdropUrl` commencent par `https://`
 - **Critère de succès :** toutes les URLs en `https://`
 
 ---
@@ -218,7 +218,7 @@ Post-v1 (non-breaking, safe à ajouter en v1.x) : UI refonte, peer-of-peer disco
 - B les ajoute en "pending" — l'admin approuve ou auto-approve si configuré
 - Propagation limitée à 1 hop
 
-**Endpoints :** `GET /JellyFed/peers` → déjà disponible. `POST /JellyFed/peer/register` → déjà disponible.
+**Endpoints :** `GET /JellyFed/v1/peers` → déjà disponible. `POST /JellyFed/v1/peer/register` → déjà disponible.
 
 ---
 
@@ -240,13 +240,13 @@ Post-v1 (non-breaking, safe à ajouter en v1.x) : UI refonte, peer-of-peer disco
 
 ### FEAT-05 — Suppression propagée
 **Contexte :** Si A supprime B, les `.strm` de B restent chez les peers de A.
-- Signal `POST /JellyFed/peer/leave` envoyé à B quand A supprime B
+- Signal `POST /JellyFed/v1/peer/leave` envoyé à B quand A supprime B
 - B supprime les `.strm` de A de sa bibliothèque
 
 ---
 
 ### FEAT-06 — Tag peer dans les items Jellyfin (partiellement implémenté)
-**Statut :** ✅ `GET /JellyFed/manifest/stats` + `POST /JellyFed/peer/purge` + section "Synced Catalogue" dans l'UI.
+**Statut :** ✅ `GET /JellyFed/v1/manifest/stats` + `POST /JellyFed/v1/peer/purge` + section "Synced Catalogue" dans l'UI.
 **Restant :** Tag `<studio>JellyFed:peer-b</studio>` dans le `.nfo` pour filtrage natif Jellyfin (optionnel).
 
 ---
