@@ -8,56 +8,118 @@ sans modifier le manifest versionné ni build-repo.sh.
 Ajoute des libellés « dev » (overview / changelog) pour distinguer le dépôt LAN
 dans l’interface Jellyfin — voir docs/dev-local-repo.md.
 
-Force la version catalogue de l’entrée la plus récente à `1.3.3.<epoch_seconds>`
-(strictement monotone à chaque build). Cela permet à Jellyfin de proposer
-l’upgrade à chaque `make dev`, même si le binaire du ZIP sous-jacent ne bump
-pas `build.yaml`. Un lien symbolique `repo/jellyfed_<version>.zip` pointe sur
-le ZIP réel pour aligner nom de fichier et numéro.
+Force la version catalogue de l’entrée la plus récente à
+`<major>.<minor>.<patch>.<stamp>` à partir de `build.yaml`.
+Cela permet à Jellyfin de proposer l’upgrade à chaque `make dev`, tout en
+conservant une version dev locale lisible et alignée sur la vraie base du code.
+Un lien symbolique `repo/jellyfed_<version>.zip` pointe sur le ZIP réel pour
+aligner nom de fichier et numéro.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 import time
 from pathlib import Path
 from urllib.parse import urlparse
 
 _DEV_OVERVIEW_PREFIX = "[Dépôt LAN · dev] "
-_DEV_CHANGELOG_PREFIX = "[Build locale] "
-# Prefix fixe du schéma dev. Le dernier composant est l'epoch Unix (strictement croissant)
-# → chaque `make dev` produit une version plus grande que la précédente et Jellyfin propose
-# systématiquement l'upgrade, même sur une instance qui avait déjà installé une version dev.
-_LOCAL_VERSION_PREFIX = "1.3.3"
+_DEV_CHANGELOG_PREFIX = "[Dev local] "
+_MAIN_CHANGELOG_PREFIX = "[Main release] "
+# Base du schéma dev local, dérivée de build.yaml.
+# Le dernier composant encode l'état courant du code source.
+# - repo clean: timestamp Unix du commit HEAD
+# - repo dirty: timestamp courant (strictement > au commit, donc plus récent)
+# Ainsi la version exposée par le manifest local suit réellement l'état du dossier JellyFed.
 
 
-def _compute_local_catalog_version() -> str:
-    """Version dev strictement monotone : `1.3.3.<epoch_seconds>`.
+def _git_output(root: Path, *args: str) -> str | None:
+    try:
+        proc = subprocess.run(
+            ['git', *args],
+            cwd=root,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        return proc.stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return None
 
-    L'epoch Unix tient dans Int32 (max 2 147 483 647 ≈ année 2038), donc
-    System.Version (utilisé par Jellyfin) accepte sans débordement.
+
+def _build_version_prefix(root: Path) -> str:
+    build_yaml = root / 'build.yaml'
+    for line in build_yaml.read_text(encoding='utf-8').splitlines():
+        if line.startswith('version:'):
+            raw = line.split(':', 1)[1].strip().strip('"')
+            parts = [p for p in raw.split('.') if p]
+            if len(parts) >= 3 and all(p.isdigit() for p in parts[:3]):
+                return '.'.join(parts[:3])
+            break
+    return '0.0.0'
+
+
+def _compute_local_catalog_version(root: Path) -> tuple[str, str]:
+    """Version dev liée au code source courant.
+
+    Retourne `(version, source_note)` où `version` est `<base_build_version>.<stamp>`.
+    - Si le repo git est clean, `<stamp>` = timestamp Unix du commit HEAD.
+    - Si le repo a des modifs non commit, `<stamp>` = max(now, head_ts + 1).
+    - Si git n'est pas dispo, fallback sur `time.time()`.
     """
-    return f"{_LOCAL_VERSION_PREFIX}.{int(time.time())}"
+    head_ts_raw = _git_output(root, 'log', '-1', '--format=%ct', 'HEAD')
+    head_sha = _git_output(root, 'rev-parse', '--short', 'HEAD')
+    dirty = bool(_git_output(root, 'status', '--porcelain'))
+
+    try:
+        head_ts = int(head_ts_raw) if head_ts_raw else 0
+    except ValueError:
+        head_ts = 0
+
+    now_ts = int(time.time())
+    if head_ts > 0:
+        stamp = max(now_ts, head_ts + 1) if dirty else head_ts
+        note = f"git {head_sha or 'HEAD'} ({'dirty' if dirty else 'clean'})"
+    else:
+        stamp = now_ts
+        note = 'no-git-fallback'
+
+    return f"{_build_version_prefix(root)}.{stamp}", note
+
+
+def _strip_known_prefixes(text: str) -> str:
+    prefixes = (_DEV_CHANGELOG_PREFIX, _MAIN_CHANGELOG_PREFIX, '[Build locale] ')
+    out = text
+    changed = True
+    while changed:
+        changed = False
+        for prefix in prefixes:
+            if out.startswith(prefix):
+                out = out[len(prefix):].lstrip()
+                changed = True
+    return out
 
 
 def _apply_dev_labels(plugin: dict, versions: list) -> None:
     ov = plugin.get("overview")
     if isinstance(ov, str) and ov and not ov.startswith(_DEV_OVERVIEW_PREFIX):
-        plugin["overview"] = _DEV_OVERVIEW_PREFIX + ov
+        plugin["overview"] = _DEV_OVERVIEW_PREFIX + ov.removeprefix(_DEV_OVERVIEW_PREFIX)
     elif not isinstance(ov, str) or not ov:
         plugin["overview"] = _DEV_OVERVIEW_PREFIX.strip()
 
     for i, v in enumerate(versions):
         if not isinstance(v, dict):
             continue
-        # L’entrée la plus récente : changelog réécrit plus bas (aligné sur la version catalogue LAN).
-        if i == 0:
-            continue
         ch = v.get("changelog")
-        if isinstance(ch, str) and ch and not ch.startswith(_DEV_CHANGELOG_PREFIX):
-            v["changelog"] = _DEV_CHANGELOG_PREFIX + ch
-        elif not isinstance(ch, str) or not ch:
-            v["changelog"] = _DEV_CHANGELOG_PREFIX.strip()
+        base = _strip_known_prefixes(ch) if isinstance(ch, str) and ch else ''
+        if i == 0:
+            # une seule version dev locale : la plus récente
+            v["changelog"] = base or 'Build locale.'
+        else:
+            v["changelog"] = f"{_MAIN_CHANGELOG_PREFIX}{base}" if base else _MAIN_CHANGELOG_PREFIX.strip()
 
 
 def main() -> int:
@@ -108,9 +170,9 @@ def main() -> int:
     # manifest.local.json sert uniquement au dépôt LAN : libellés explicites dans l’UI Jellyfin.
     _apply_dev_labels(plugin, versions)
 
-    # Version catalogue LAN (strictement monotone grâce à l'epoch) — calculée ici et réutilisée
-    # à la fois pour le champ `version`, le symlink et le changelog.
-    local_catalog_version = _compute_local_catalog_version()
+    # Version catalogue LAN liée à l'état courant du code source — réutilisée à la fois
+    # pour le champ `version`, le symlink et le changelog.
+    local_catalog_version, source_note = _compute_local_catalog_version(root)
 
     missing: list[str] = []
     for v in versions:
@@ -149,11 +211,11 @@ def main() -> int:
                     # Purge des alias dev précédents (`jellyfed_1.3.3.<epoch>.zip` symlinks) pour
                     # éviter qu'ils s'accumulent à chaque `make dev`. On ne touche qu'aux symlinks,
                     # jamais aux ZIP réels produits par build-repo.sh.
-                    prefix = f"jellyfed_{_LOCAL_VERSION_PREFIX}."
+                    local_prefix = f"jellyfed_{_build_version_prefix(root)}."
                     for old in repo_dir.glob("jellyfed_*.zip"):
                         if old.name == alias_name or old.name == real_name:
                             continue
-                        if old.is_symlink() and old.name.startswith(prefix):
+                        if old.is_symlink() and old.name.startswith(local_prefix):
                             try:
                                 old.unlink()
                             except OSError:
@@ -189,10 +251,15 @@ def main() -> int:
                         artifact_stem = tn[len("jellyfed_") : -len(".zip")]
                 except OSError:
                     pass
-        v0["changelog"] = (
-            f"[Build locale] JellyFed {local_catalog_version} — "
-            f"binaire issu du ZIP jellyfed_{artifact_stem or '?'}.zip (build-repo.sh / build.yaml)."
+        base_changelog = _strip_known_prefixes(v0.get("changelog", ""))
+        details = (
+            f"JellyFed {local_catalog_version} — binaire issu du ZIP jellyfed_{artifact_stem or '?'}.zip "
+            f"(source: {source_note}; build-repo.sh / build.yaml)."
         )
+        if base_changelog:
+            v0["changelog"] = f"{_DEV_CHANGELOG_PREFIX}{base_changelog} {details}"
+        else:
+            v0["changelog"] = f"{_DEV_CHANGELOG_PREFIX}{details}"
 
     with dst.open("w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2, ensure_ascii=False)
@@ -207,12 +274,12 @@ def main() -> int:
         f"(entrée la plus récente = {local_catalog_version} ; sourceUrl du ZIP → voir manifest)"
     )
     print(
-        "Overview [Dépôt LAN · dev] ; changelog entrée principale = version catalogue "
+        "Overview [Dépôt LAN · dev] ; changelog entrée principale = [Dev local] + version catalogue "
         f"{local_catalog_version} + référence au ZIP de build."
     )
     print(
-        "Version dev strictement monotone (epoch Unix en dernier composant) → chaque "
-        "`make dev` déclenche un upgrade côté Jellyfin même sans bump de build.yaml."
+        "Version dev alignée sur l'état courant du dossier source "
+        f"({source_note}) ; si le repo est dirty, un stamp plus récent est exposé."
     )
     print(f"URL dépôt Jellyfin (à coller dans Dashboard → Plugins → Repositories) :")
     print(f"  {base}/manifest.local.json")

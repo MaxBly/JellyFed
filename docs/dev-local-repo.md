@@ -15,20 +15,23 @@ Le **fichier ZIP** servi est toujours celui produit par **`./scripts/build-repo.
 
 Dans **`manifest.local.json`**, pour le catalogue Jellyfin :
 
-- La **première entrée** de `versions` (la plus récente) a son champ **`version`** forcé à **`1.3.3.<epoch>`** (epoch Unix en secondes au moment du build). Ce schéma est **strictement monotone** : chaque `make dev` produit un numéro plus grand que le précédent, donc **Jellyfin propose systématiquement l’upgrade**, même si tu as déjà installé une version dev sur l’instance cible. L’epoch Unix tient dans `Int32` (valide jusqu’en 2038), compatible avec `System.Version` côté Jellyfin.
-- Un **lien symbolique** `repo/jellyfed_1.3.3.<epoch>.zip` → le ZIP réel du build (ex. `jellyfed_0.1.0.14.zip`) est créé à chaque `make dev`. Les alias précédents (`jellyfed_1.3.3.<ancien_epoch>.zip`) sont purgés automatiquement pour ne pas encombrer `repo/`.
+- La **première entrée** de `versions` (la plus récente) a son champ **`version`** forcé à **`<major>.<minor>.<patch>.<stamp>`**, où `major.minor.patch` vient de `build.yaml`.
+- `<stamp>` suit **l’état réel du dossier source** :
+  - **repo clean** → timestamp Unix du commit `HEAD`
+  - **repo dirty** → timestamp courant (strictement plus récent que `HEAD`)
+- Résultat : la version exposée par le manifest local suit toujours le code actuellement présent dans `jellyfed/`, et chaque build local plus récent reste vu comme une upgrade par Jellyfin.
+- Un **lien symbolique** `repo/jellyfed_<major>.<minor>.<patch>.<stamp>.zip` → le ZIP réel du build (ex. `jellyfed_0.1.0.15.zip`) est créé à chaque `make dev`. Les alias précédents sont purgés automatiquement pour ne pas encombrer `repo/`.
 - Les entrées plus anciennes du tableau `versions`, si présentes, **conservent** leurs numéros d’origine.
 - **`overview`** : préfixe `[Dépôt LAN · dev]`
 - **`changelog`** de l’entrée **la plus récente** : texte du type  
-  `[Build locale] JellyFed 1.3.3.<epoch> — binaire issu du ZIP jellyfed_<x.y.z>.zip (build-repo.sh / build.yaml).`  
-  où `<x.y.z>` est la **version du build** lue depuis le nom du ZIP (plus d’ancien « Release 0.1.0.0 » recopié tel quel).
+  `[Dev local] ... JellyFed <major>.<minor>.<patch>.<stamp> — binaire issu du ZIP jellyfed_<x.y.z>.zip (source: git <sha> (clean|dirty); build-repo.sh / build.yaml).`
 - **Entrées `versions` plus anciennes** : changelog inchangé par rapport au manifest source, avec préfixe `[Build locale]` si besoin.
 
 ## Conflits si JellyFed est déjà dans un autre dépôt ?
 
 - Jellyfin identifie un plugin par son **`guid`** (dans `build.yaml`). Il n’y a **qu’une installation** de JellyFed par serveur pour ce GUID.
 - Avoir **plusieurs dépôts** qui listent le même plugin (même GUID) **ne duplique pas** l’installation : vous voyez une entrée dans le catalogue, et les mises à jour peuvent provenir de **l’un ou l’autre** dépôt selon ce que Jellyfin propose / résout.
-- **Avantage du dépôt LAN** : l’entrée catalogue la plus récente est en **`1.3.3.<epoch>`** (gros numéro), donc **aucune collision de numéro** avec le dépôt public (`0.1.0.x`) pour la même ligne « JellyFed », et chaque `make dev` est toujours vu comme une version plus récente par Jellyfin.
+- **Avantage du dépôt LAN** : l’entrée catalogue la plus récente reprend la vraie base de version du projet, mais avec un dernier composant `<stamp>` beaucoup plus grand que la release packagée, donc Jellyfin voit bien la build locale comme plus récente tout en gardant un numéro qui a du sens.
 - **Risque résiduel** : deux ZIP différents pour **le même numéro** affiché restent possibles si vous bricolez les manifestes ; en pratique, gardez un seul dépôt actif si vous voyez un comportement bizarre de mise à jour.
 
 Il n’y a pas de « conflit » au sens installation cassée automatiquement, mais **évitez deux sources concurrentes pour la même version** si vous comparez des binaires différents.
@@ -130,7 +133,7 @@ docker compose -f docker/dev-repo/docker-compose.yml down
 |---------|------|
 | `docker/dev-repo/docker-compose.yml` | Service `nginx:alpine`, montage du dossier `repo/`. |
 | `docker/dev-repo/nginx.conf` | Config Nginx (listing de répertoire activé pour repérer vite les ZIP). |
-| `scripts/generate-manifest-local.py` | Crée `repo/manifest.local.json` (URLs LAN, overview dev, version `1.3.3.<epoch>` monotone + symlink ZIP aligné). |
+| `scripts/generate-manifest-local.py` | Crée `repo/manifest.local.json` (URLs LAN, overview dev, version `<major>.<minor>.<patch>.<stamp>` alignée sur l’état du code source + symlink ZIP aligné). |
 | `scripts/detect_lan_ip.py` | Détection de l’IPv4 LAN pour construire l’URL du dépôt. |
 | `scripts/dev-repo-up.sh` | Manifest local + `docker compose up` (premier plan, logs console). |
 | `repo/manifest.local.json` | Généré, **non versionné** (voir `.gitignore`). |
@@ -144,17 +147,17 @@ docker compose -f docker/dev-repo/docker-compose.yml down
   - après `make dev`, vérifiez dans la console la liste **`Fichiers servis par Nginx`** : `manifest.local.json` doit apparaître ; testez dans un navigateur ou avec `curl -fI "http://<ip>:8765/manifest.local.json"` depuis une autre machine du LAN.
 - **Installation du plugin : `HttpRequestException` 404** : Jellyfin télécharge le ZIP via l’URL exacte du champ **`sourceUrl`** du manifeste (requête HTTP `GET`). Un **404** signifie presque toujours que **Nginx a répondu « fichier absent »** : le nom dans l’URL ne correspond pas à un fichier sous `repo/` (ou le serveur `make dev` n’est pas lancé). Vérifications :
   1. `make dev` / `docker compose` du dépôt LAN **tourne** pendant l’installation.
-  2. Après **`./scripts/build-repo.sh`**, relancez **`make dev`** pour régénérer `manifest.local.json` et le lien `jellyfed_1.3.3.<epoch>.zip` courant.
+  2. Après **`./scripts/build-repo.sh`**, relancez **`make dev`** pour régénérer `manifest.local.json` et le lien `jellyfed_<major>.<minor>.<patch>.<stamp>.zip` courant.
   3. Sur la **même machine que le processus Jellyfin** (ou depuis le conteneur Jellyfin si Docker) : récupérer l’URL exacte du champ `sourceUrl` de la dernière entrée de `repo/manifest.local.json`, puis tester avec `curl -fIL "<sourceUrl>"`. Si `curl` échoue, Jellyfin échouera pareil.
   4. Jellyfin **dans Docker** : l’IP ou le hostname dans le manifeste doit être **joignable depuis ce conteneur** (souvent IP LAN de l’hôte, `172.17.0.1`, ou `host.docker.internal` selon l’OS / la config).
 - **Échec du téléchargement du ZIP dans Jellyfin** : le `sourceUrl` doit utiliser une IP/hostname que **le processus Jellyfin** peut résoudre et joindre. Depuis la machine Jellyfin : `curl -I http://.../jellyfed_x.y.z.zip`.
 - **Firewall** : autorisez le port choisi (8765 par défaut) en entrée sur la machine qui exécute Docker.
 - **Après un nouveau build** : relancez `./scripts/build-repo.sh`, puis regénérez `manifest.local.json` et redémarrez ou rafraîchissez le cache plugins côté Jellyfin si besoin.
-- **L’install ne se déclenche pas sur une instance qui avait déjà une version précédente** : Jellyfin compare les `System.Version` dans le manifeste à celle du plugin déjà installé ; si c’est identique il n’y a **aucune action**. Depuis la version actuelle du script, la version dev est `1.3.3.<epoch>` (monotone), donc chaque `make dev` doit proposer un upgrade. Si tu vois quand même « Aucune mise à jour » :
-  1. Vérifie dans **Dashboard → Plugins → Catalog → JellyFed** la version annoncée par le dépôt LAN : elle doit se terminer par un gros nombre (ex. `1.3.3.1761234567`) **et** être supérieure à la version listée sous **Plugins → My Plugins**.
+- **L’install ne se déclenche pas sur une instance qui avait déjà une version précédente** : Jellyfin compare les `System.Version` dans le manifeste à celle du plugin déjà installé ; si c’est identique il n’y a **aucune action**. Depuis la version actuelle du script, la version dev suit la base de `build.yaml` et encode l’état du code dans le dernier composant, donc chaque build local plus récent doit proposer un upgrade. Si tu vois quand même « Aucune mise à jour » :
+  1. Vérifie dans **Dashboard → Plugins → Catalog → JellyFed** la version annoncée par le dépôt LAN : elle doit se terminer par un gros nombre (ex. `0.1.0.1761234567`) **et** être supérieure à la version listée sous **Plugins → My Plugins**.
   2. **Force un refresh du catalogue** Jellyfin (Dashboard → Plugins → Repositories : supprime puis re-ajoute l’URL, ou redémarre le serveur Jellyfin pour vider le cache).
   3. Assure-toi que `curl -fL "http://<ip>:8765/manifest.local.json"` depuis la machine Jellyfin renvoie bien le nouveau numéro (si le cache HTTP côté Jellyfin est périmé, la comparaison se fait contre l’ancien manifeste).
-  4. Si un ancien `1.3.3.<ancien_epoch>` est installé et que le nouveau manifeste affiche un numéro plus petit (impossible en temps normal — seulement si l’horloge système a reculé), bump manuellement en attendant que l’horloge rattrape.
+  4. Si un ancien `<major>.<minor>.<patch>.<ancien_stamp>` est installé et que le nouveau manifeste affiche un numéro plus petit (cas pathologique : horloge système cassée ou commit daté dans le passé), régénère le manifest après correction de l’horloge ou avec un état de code plus récent.
 
 ## Relation avec `build-repo.sh` et le VPS
 

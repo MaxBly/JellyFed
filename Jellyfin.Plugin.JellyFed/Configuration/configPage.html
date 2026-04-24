@@ -216,6 +216,20 @@
                             </div>
                         </div>
 
+                        <div style="margin-top:1.25em;padding:.9em 1em;border:1px solid #333;border-radius:6px;background:rgba(255,255,255,.02);">
+                            <div style="font-weight:600;margin-bottom:.35em;">Quick setup</div>
+                            <div class="fieldDescription" style="margin-bottom:.75em;">
+                                Creates the three recommended Jellyfin libraries if they do not already exist:
+                                <code>JellyFed Movies</code>, <code>JellyFed Series</code> and <code>JellyFed Anime</code>.
+                            </div>
+                            <div style="display:flex;gap:.75em;align-items:center;flex-wrap:wrap;">
+                                <button type="button" id="createLibrariesBtn" class="emby-button raised">
+                                    <span>Create JellyFed libraries</span>
+                                </button>
+                                <span id="createLibrariesStatus" style="color:#aaa;font-size:.9em;"></span>
+                            </div>
+                        </div>
+
                         <div style="margin-top: 1.5em;">
                             <button type="submit" class="emby-button raised button-submit">
                                 <span>Save</span>
@@ -412,10 +426,38 @@
                     return document.querySelector('#federationToken').value;
                 }
 
+                function getAdminToken() {
+                    if (window.ApiClient && typeof ApiClient.accessToken === 'function') {
+                        return ApiClient.accessToken();
+                    }
+                    if (window.ApiClient && ApiClient._serverInfo && ApiClient._serverInfo.AccessToken) {
+                        return ApiClient._serverInfo.AccessToken;
+                    }
+                    return '';
+                }
+
                 function authHeaders(json) {
                     var h = { 'Authorization': 'Bearer ' + getToken() };
                     if (json) { h['Content-Type'] = 'application/json'; }
                     return h;
+                }
+
+                function adminHeaders(json) {
+                    var h = {};
+                    var token = getAdminToken();
+                    if (token) {
+                        h['X-Emby-Token'] = token;
+                    }
+                    if (json) {
+                        h['Content-Type'] = 'application/json';
+                    }
+                    return h;
+                }
+
+                function adminFetch(path, options) {
+                    var opts = Object.assign({ method: 'GET', headers: {} }, options || {});
+                    opts.headers = Object.assign({}, adminHeaders(false), opts.headers || {});
+                    return fetch(jellyFedUrl(path), opts);
                 }
 
                 // ── Tabs ──────────────────────────────────────────────────────
@@ -844,6 +886,20 @@
                     });
                 }
 
+                function collectSettingsPayload(page, fresh) {
+                    return Object.assign({}, fresh, {
+                        FederationToken: page.querySelector('#federationToken').value,
+                        SyncIntervalHours: parseInt(page.querySelector('#syncIntervalHours').value, 10) || 6,
+                        LibraryPath: page.querySelector('#libraryPath').value,
+                        MoviesRootPath: page.querySelector('#moviesRootPath').value,
+                        SeriesRootPath: page.querySelector('#seriesRootPath').value,
+                        AnimeRootPath: page.querySelector('#animeRootPath').value,
+                        JellyfinApiKey: page.querySelector('#jellyfinApiKey').value,
+                        SelfName: page.querySelector('#selfName').value,
+                        SelfUrl: page.querySelector('#selfUrl').value
+                    });
+                }
+
                 function saveSettings(page, e) {
                     e.preventDefault();
                     Dashboard.showLoadingMsg();
@@ -851,23 +907,132 @@
                     // form fields on top. This avoids wiping Peers / BlockedPeerUrls that were
                     // updated via the dedicated peer endpoints while this page was open.
                     ApiClient.getPluginConfiguration(pluginId).then(function (fresh) {
-                        var payload = Object.assign({}, fresh, {
-                            FederationToken: page.querySelector('#federationToken').value,
-                            SyncIntervalHours: parseInt(page.querySelector('#syncIntervalHours').value, 10) || 6,
-                            LibraryPath: page.querySelector('#libraryPath').value,
-                            MoviesRootPath: page.querySelector('#moviesRootPath').value,
-                            SeriesRootPath: page.querySelector('#seriesRootPath').value,
-                            AnimeRootPath: page.querySelector('#animeRootPath').value,
-                            JellyfinApiKey: page.querySelector('#jellyfinApiKey').value,
-                            SelfName: page.querySelector('#selfName').value,
-                            SelfUrl: page.querySelector('#selfUrl').value
-                        });
+                        var payload = collectSettingsPayload(page, fresh);
                         return ApiClient.updatePluginConfiguration(pluginId, payload).then(function () {
                             Dashboard.processPluginConfigurationUpdateResult();
                             config = payload;
                         });
                     }).catch(function (err) {
                         console.error('[JellyFed] saveSettings — failed:', err);
+                    });
+                }
+
+                function getCollectionTypeForSpec(key) {
+                    if (key === 'movies') { return 'movies'; }
+                    if (key === 'series') { return 'tvshows'; }
+                    return 'mixed';
+                }
+
+                function getQuickLibrarySpecs(page, ensuredRoots) {
+                    return [
+                        { key: 'movies', name: 'JellyFed Movies', path: ensuredRoots.moviesRoot || page.querySelector('#moviesRootPath').value.trim() },
+                        { key: 'series', name: 'JellyFed Series', path: ensuredRoots.seriesRoot || page.querySelector('#seriesRootPath').value.trim() },
+                        { key: 'anime', name: 'JellyFed Anime', path: ensuredRoots.animeRoot || page.querySelector('#animeRootPath').value.trim() }
+                    ].filter(function (spec) { return !!spec.path; });
+                }
+
+                function setQuickLibrariesStatus(page, text, color) {
+                    var el = page.querySelector('#createLibrariesStatus');
+                    el.style.color = color || '#aaa';
+                    el.textContent = text || '';
+                }
+
+                function createVirtualFolder(spec, refreshLibrary) {
+                    var params = new URLSearchParams();
+                    params.set('name', spec.name);
+                    params.set('collectionType', getCollectionTypeForSpec(spec.key));
+                    params.set('paths', spec.path);
+                    params.set('refreshLibrary', refreshLibrary ? 'true' : 'false');
+                    return adminFetch('/Library/VirtualFolders?' + params.toString(), {
+                        method: 'POST',
+                        headers: adminHeaders(true),
+                        body: JSON.stringify({ LibraryOptions: null })
+                    }).then(function (r) {
+                        if (!r.ok) {
+                            return readErrorMessage(r).then(function (m) { throw new Error(m); });
+                        }
+                    });
+                }
+
+                function createQuickLibraries(page) {
+                    var btn = page.querySelector('#createLibrariesBtn');
+                    btn.disabled = true;
+                    btn.querySelector('span').textContent = 'Creating…';
+                    setQuickLibrariesStatus(page, 'Saving settings and checking libraries…');
+
+                    ApiClient.getPluginConfiguration(pluginId).then(function (fresh) {
+                        var payload = collectSettingsPayload(page, fresh);
+                        return ApiClient.updatePluginConfiguration(pluginId, payload).then(function () {
+                            config = payload;
+                            return fetch(jellyFedUrl('/JellyFed/libraries/roots/ensure'), {
+                                method: 'POST',
+                                headers: authHeaders(true),
+                                body: JSON.stringify({})
+                            });
+                        });
+                    }).then(function (r) {
+                        if (!r.ok) { return readErrorMessage(r).then(function (m) { throw new Error(m); }); }
+                        return r.json();
+                    }).then(function (ensuredRoots) {
+                        var specs = getQuickLibrarySpecs(page, ensuredRoots || {});
+                        if (specs.length < 3) {
+                            throw new Error('Configure Movies, Series and Anime roots first.');
+                        }
+                        return adminFetch('/Library/VirtualFolders', { method: 'GET' }).then(function (r) {
+                            if (!r.ok) { return readErrorMessage(r).then(function (m) { throw new Error(m); }); }
+                            return r.json();
+                        }).then(function (folders) {
+                            return { specs: specs, folders: folders || [] };
+                        });
+                    }).then(function (ctx) {
+                        var folders = ctx.folders;
+                        var specs = ctx.specs;
+                        var created = [];
+                        var skipped = [];
+                        var conflicts = [];
+                        var toCreate = [];
+
+                        specs.forEach(function (spec) {
+                            var existing = (folders || []).find(function (folder) {
+                                return pick(folder, 'name') === spec.name;
+                            });
+                            if (!existing) {
+                                toCreate.push(spec);
+                                return;
+                            }
+                            var locations = pick(existing, 'locations') || [];
+                            if (locations.indexOf(spec.path) >= 0) {
+                                skipped.push(spec.name);
+                            } else {
+                                conflicts.push(spec.name + ' → ' + locations.join(', '));
+                            }
+                        });
+
+                        var chain = Promise.resolve();
+                        toCreate.forEach(function (spec, idx) {
+                            chain = chain.then(function () {
+                                setQuickLibrariesStatus(page, 'Creating ' + spec.name + '…');
+                                return createVirtualFolder(spec, idx === toCreate.length - 1).then(function () {
+                                    created.push(spec.name);
+                                });
+                            });
+                        });
+
+                        return chain.then(function () {
+                            return { created: created, skipped: skipped, conflicts: conflicts };
+                        });
+                    }).then(function (result) {
+                        var parts = [];
+                        if (result.created.length) { parts.push('Created: ' + result.created.join(', ')); }
+                        if (result.skipped.length) { parts.push('Already there: ' + result.skipped.join(', ')); }
+                        if (result.conflicts.length) { parts.push('Name conflict: ' + result.conflicts.join(' · ')); }
+                        setQuickLibrariesStatus(page, parts.join(' · ') || 'Nothing to do.', result.conflicts.length ? '#e0a070' : '#7fcf7f');
+                    }).catch(function (err) {
+                        console.error('[JellyFed] createQuickLibraries — failed:', err);
+                        setQuickLibrariesStatus(page, 'Error: ' + err.message, '#e07070');
+                    }).finally(function () {
+                        btn.disabled = false;
+                        btn.querySelector('span').textContent = 'Create JellyFed libraries';
                     });
                 }
 
@@ -926,6 +1091,10 @@
                 });
 
                 page.querySelector('#saveBlockedBtn').addEventListener('click', function () { saveBlocked(page); });
+
+                page.querySelector('#createLibrariesBtn').addEventListener('click', function () {
+                    createQuickLibraries(page);
+                });
 
                 page.querySelector('#copyTokenBtn').addEventListener('click', function () {
                     var token = getToken();

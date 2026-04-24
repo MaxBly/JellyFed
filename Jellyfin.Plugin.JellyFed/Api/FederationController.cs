@@ -302,6 +302,44 @@ public class FederationController : ControllerBase
     }
 
     /// <summary>
+    /// Ensures the configured JellyFed content roots exist on disk.
+    /// </summary>
+    /// <returns>The effective movies / series / anime roots.</returns>
+    [HttpPost("libraries/roots/ensure")]
+    [AllowAnonymous]
+    [ServiceFilter(typeof(FederationAuthFilter))]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public ActionResult<object> EnsureLibraryRoots()
+    {
+        var config = Plugin.Instance?.Configuration;
+        if (config is null)
+        {
+            return Ok(new { moviesRoot = string.Empty, seriesRoot = string.Empty, animeRoot = string.Empty });
+        }
+
+        var moviesRoot = config.GetEffectiveMoviesRoot();
+        var seriesRoot = config.GetEffectiveSeriesRoot();
+        var animeRoot = config.GetEffectiveAnimeRoot();
+
+        if (!string.IsNullOrWhiteSpace(moviesRoot))
+        {
+            Directory.CreateDirectory(moviesRoot);
+        }
+
+        if (!string.IsNullOrWhiteSpace(seriesRoot))
+        {
+            Directory.CreateDirectory(seriesRoot);
+        }
+
+        if (!string.IsNullOrWhiteSpace(animeRoot))
+        {
+            Directory.CreateDirectory(animeRoot);
+        }
+
+        return Ok(new { moviesRoot, seriesRoot, animeRoot });
+    }
+
+    /// <summary>
     /// Returns all configured peers with their current online/offline status.
     /// </summary>
     /// <returns>Peer list with status.</returns>
