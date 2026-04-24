@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
+using System.IO;
 using MediaBrowser.Model.Plugins;
 
 namespace Jellyfin.Plugin.JellyFed.Configuration;
@@ -22,6 +23,9 @@ public class PluginConfiguration : BasePluginConfiguration
         SelfUrl = string.Empty;
         SelfName = string.Empty;
         JellyfinApiKey = string.Empty;
+        MoviesRootPath = string.Empty;
+        SeriesRootPath = string.Empty;
+        AnimeRootPath = string.Empty;
     }
 
     /// <summary>
@@ -41,9 +45,26 @@ public class PluginConfiguration : BasePluginConfiguration
     public int SyncIntervalHours { get; set; }
 
     /// <summary>
-    /// Gets or sets the local path where .strm files and metadata are written.
+    /// Gets or sets the directory for JellyFed metadata (.jellyfed-manifest.json, .jellyfed-peers.json).
+    /// Default: {DataPath}/jellyfed-library. Movies/Series/Anime .strm trees use <see cref="GetEffectiveMoviesRoot"/> etc.
     /// </summary>
     public string LibraryPath { get; set; }
+
+    /// <summary>
+    /// Gets or sets the root folder for federated movies (.strm). When empty, defaults to {LibraryPath}/Films.
+    /// </summary>
+    public string MoviesRootPath { get; set; }
+
+    /// <summary>
+    /// Gets or sets the root folder for federated TV series. When empty, defaults to {LibraryPath}/Series.
+    /// </summary>
+    public string SeriesRootPath { get; set; }
+
+    /// <summary>
+    /// Gets or sets the root folder for federated anime (movies or series classified via genres).
+    /// When empty, defaults to {LibraryPath}/Animes.
+    /// </summary>
+    public string AnimeRootPath { get; set; }
 
     /// <summary>
     /// Gets or sets the federation token exposed by this instance to peers.
@@ -75,4 +96,56 @@ public class PluginConfiguration : BasePluginConfiguration
     /// Create one in Dashboard → API Keys.
     /// </summary>
     public string JellyfinApiKey { get; set; }
+
+    /// <summary>
+    /// Effective root for movie .strm content (per-peer subfolders are created under this path).
+    /// </summary>
+    /// <returns>Absolute path, or empty when <see cref="LibraryPath"/> is not set and no override is configured.</returns>
+    public string GetEffectiveMoviesRoot()
+    {
+        if (!string.IsNullOrWhiteSpace(MoviesRootPath))
+        {
+            return MoviesRootPath.Trim();
+        }
+
+        return CombineUnderLibrary("Films");
+    }
+
+    /// <summary>
+    /// Effective root for TV series .strm content.
+    /// </summary>
+    /// <returns>Absolute path, or empty when <see cref="LibraryPath"/> is not set and no override is configured.</returns>
+    public string GetEffectiveSeriesRoot()
+    {
+        if (!string.IsNullOrWhiteSpace(SeriesRootPath))
+        {
+            return SeriesRootPath.Trim();
+        }
+
+        return CombineUnderLibrary("Series");
+    }
+
+    /// <summary>
+    /// Effective root for anime (movies or series with an Anime-related genre).
+    /// </summary>
+    /// <returns>Absolute path, or empty when <see cref="LibraryPath"/> is not set and no override is configured.</returns>
+    public string GetEffectiveAnimeRoot()
+    {
+        if (!string.IsNullOrWhiteSpace(AnimeRootPath))
+        {
+            return AnimeRootPath.Trim();
+        }
+
+        return CombineUnderLibrary("Animes");
+    }
+
+    private string CombineUnderLibrary(string segment)
+    {
+        if (string.IsNullOrWhiteSpace(LibraryPath))
+        {
+            return string.Empty;
+        }
+
+        return Path.Combine(LibraryPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), segment);
+    }
 }

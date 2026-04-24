@@ -11,23 +11,23 @@ JellyFed est un plugin Jellyfin (C# / .NET 9) qui implémente la fédération de
 Jellyfin supporte nativement les fichiers `.strm` : un fichier texte contenant une URL. Quand le scanner trouve un `.strm`, il l'indexe comme un média normal (film, épisode) et envoie l'URL comme source de lecture au client.
 
 ```
-{LibraryPath}/
-  Films/
-    Oppenheimer (2023)/
-      Oppenheimer (2023).strm    → "https://peer-b/JellyFed/stream/abc123?token=fed_token"
-      Oppenheimer (2023).nfo     → métadonnées + codec info (titre, année, TMDB ID, streams...)
-      poster.jpg                 → téléchargé depuis peer-b lors de la sync
-      fanart.jpg
-  Series/
-    Breaking Bad (2008)/
-      tvshow.nfo
-      poster.jpg / fanart.jpg
-      Season 01/
-        S01E01 - Pilot.strm      → URL stream épisode
-        S01E01 - Pilot.nfo
-  .jellyfed-manifest.json        → état des syncs (clé TMDB → path + peerName)
-  .jellyfed-peers.json           → statut online/offline des peers
+{MetadataPath}/                    ← LibraryPath : manifest + états peers uniquement
+  .jellyfed-manifest.json
+  .jellyfed-peers.json
+
+{MoviesRoot}/{PeerName}/          ← racine films (MoviesRootPath ou défaut MetadataPath/Films)
+  Oppenheimer (2023)/
+    Oppenheimer (2023).strm      → "https://peer-b/JellyFed/stream/abc123?token=fed_token"
+    …
+
+{SeriesRoot}/{PeerName}/         ← séries TV non-anime
+  …
+
+{AnimeRoot}/{PeerName}/          ← films ou séries dont les genres contiennent « Anime »
+  …
 ```
+
+Les trois racines (`MoviesRootPath`, `SeriesRootPath`, `AnimeRootPath`) sont configurables dans le plugin ; si vides, défaut = `{LibraryPath}/Films`, `…/Series`, `…/Animes`. Chaque peer a un sous-dossier dédié : supprimer un peer permet de retirer tout son arbre (`Purge` / suppression du dossier du peer).
 
 **Avantages :**
 - Aucune modification des clients Jellyfin (médias transparents)
@@ -50,12 +50,14 @@ Jellyfin.Plugin.JellyFed/
                                    SyncIntervalHours, SelfUrl, SelfName, JellyfinApiKey,
                                    BlockedPeerUrls[]
     PeerConfiguration.cs           Un peer : Name, Url, FederationToken, AccessToken,
-                                   Enabled, SyncMovies, SyncSeries
-    configPage.html                Page admin Jellyfin (JS vanilla)
+                                   Enabled, SyncMovies, SyncSeries, SyncAnime
+    configPage.html                Page admin Jellyfin (JS vanilla, 4 onglets :
+                                   Readme / Settings / Peers / Danger Zone)
 
   Api/
     FederationController.cs        Endpoints /JellyFed/* (catalog, stream, image, peers,
-                                   register, sync, purge, reset)
+                                   peers/details, register, sync, peer/{name}/sync|purge|remove,
+                                   PATCH peer/{name}, reset)
     FederationAuthFilter.cs        ServiceFilter : vérifie Bearer token de fédération
     Dto/
       CatalogItemDto.cs            Film ou série : métadonnées + codec + MediaStreams[]
@@ -64,18 +66,26 @@ Jellyfin.Plugin.JellyFed/
       SeasonDto.cs / SeasonsResponseDto.cs
       MediaStreamInfoDto.cs        Une piste audio ou sous-titre (Type, Codec, Language, ...)
       PeerDto.cs / PeersResponseDto.cs
+      PeerDetailDto.cs / PeerDetailsResponseDto.cs   (onglet Peers)
+      PeerSyncResultDto.cs                           (résultat d'un sync par peer)
+      AddPeerRequestDto.cs / UpdatePeerRequestDto.cs (CRUD par peer)
       RegisterPeerRequestDto.cs / RegisterPeerResponseDto.cs
       SyncPeerRequestDto.cs / PurgePeerCatalogRequestDto.cs
       ManifestStatsDto.cs / PeerCatalogStatsDto.cs
 
   Sync/
-    FederationSyncTask.cs          IScheduledTask — sync périodique + pruning + mise à jour NFO
-    PeerClient.cs                  Client HTTP vers instances distantes
+    FederationSyncTask.cs          IScheduledTask — sync périodique + pruning + mise à jour NFO.
+                                   Expose SyncPeerAsync(peer, ct) réutilisé par l'endpoint
+                                   /peer/{name}/sync (exécution inline).
+    PeerSyncResult.cs              Résultat (added/skipped/pruned/duration/error) d'une passe par peer
+    PeerClient.cs                  Client HTTP vers instances distantes (+ HealthCheckAsync)
     StrmWriter.cs                  Génère/met à jour .strm + .nfo + télécharge artwork
     PeerHeartbeatService.cs        IHostedService — ping périodique des peers
     PeerStateStore.cs              Lecture/écriture .jellyfed-peers.json
     Manifest.cs / ManifestEntry.cs Modèles manifest
-    PeerStatus.cs                  Modèle statut heartbeat
+    PeerStatus.cs                  Modèle statut : heartbeat + LastSyncAt/Status/Error/DurationMs
+    FederatedPathHelper.cs         Résolution des 3 racines + suppression dossier par peer
+    CatalogItemClassifier.cs       Classification anime vs movie/series selon les genres
 ```
 
 ---
@@ -262,6 +272,7 @@ Sans les infos codec dans le NFO : Jellyfin suppose direct-play → browser reç
       <Enabled>true</Enabled>
       <SyncMovies>true</SyncMovies>
       <SyncSeries>true</SyncSeries>
+      <SyncAnime>true</SyncAnime>
     </PeerConfiguration>
   </Peers>
   <BlockedPeerUrls>
@@ -276,6 +287,36 @@ Sans les infos codec dans le NFO : Jellyfin suppose direct-play → browser reç
 | Docker Jellyfin | `/config/data/jellyfed-library` |
 | Linux standalone | `~/.local/share/jellyfin/data/jellyfed-library` |
 | Windows | `%ProgramData%\Jellyfin\Server\data\jellyfed-library` |
+
+---
+
+## Panneau admin — onglets et endpoints Peers
+
+La page `configPage.html` est structurée en 4 onglets côté client :
+
+| Onglet | Contenu |
+|---|---|
+| **Readme** (défaut) | Tagline, schéma concept, setup rapide 4 étapes, liens docs externes (statique, sans fetch réseau) |
+| **Settings** | Token, intervalle, racines (LibraryPath / Movies / Series / Anime), Self URL / Name, Jellyfin API key. Bouton Save → `PUT /System/Configuration/...` via `ApiClient.updatePluginConfiguration` |
+| **Peers** | Liste de cartes `PeerDetailDto` + Blocked Peers (déplacés ici) + modal Add peer |
+| **Danger Zone** | Bouton Reset Network uniquement |
+
+### Endpoints utilisés par l'onglet Peers
+
+| Endpoint | Rôle |
+|---|---|
+| `GET /JellyFed/peers/details` | Agrège `PeerConfiguration` + `PeerStatus` + manifest + taille disque + dossiers effectifs. Renvoie `PeerDetailsResponseDto` avec `LastGlobalSyncAt`. |
+| `POST /JellyFed/peers` | Crée un peer depuis la modal Add peer. Fait un health-check `/JellyFed/health` sur l'URL fournie, enlève l'URL de `BlockedPeerUrls` et sauve. |
+| `POST /JellyFed/peer/{name}/sync` | Sync par peer exécuté *inline* via `FederationSyncTask.SyncPeerAsync`. Renvoie `PeerSyncResultDto` (counts + durée + erreur éventuelle). |
+| `POST /JellyFed/peer/{name}/purge` | Supprime les `.strm` + entrées manifest du peer, vide les dossiers, reset les compteurs `PeerStatus` ; la config du peer est conservée. |
+| `POST /JellyFed/peer/{name}/remove` | Purge + révoque `AccessToken` + ajoute l'URL à `BlockedPeerUrls` + retire de `config.Peers`. |
+| `PATCH /JellyFed/peer/{name}` | Update partiel. Si `Name` change : renomme les dossiers `{Root}/{oldSeg}` → `{Root}/{newSeg}` via `Directory.Move`, réécrit les `Path` + `PeerName` dans le manifest et renomme la clé de `.jellyfed-peers.json`. |
+
+Tous ces endpoints sont protégés par `FederationAuthFilter` (Bearer = `FederationToken`).
+
+### Sync par peer — `SyncPeerAsync`
+
+`FederationSyncTask.ExecuteAsync` itère désormais en appelant `SyncSinglePeerAsync` pour chaque peer, puis marque le `PeerStatus` (`MarkSynced(durationMs)` ou `MarkSyncFailed(error, durationMs)`). `SyncPeerAsync(peer, ct)` réutilise la même passe pour l'endpoint `/peer/{name}/sync` : manifest chargé, pipeline complet, pruning scoped au peer, `QueueLibraryScan()`. Le result (`PeerSyncResult`) est aussi persisté dans `PeerStatus` avant retour à l'UI.
 
 ---
 

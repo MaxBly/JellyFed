@@ -10,167 +10,315 @@
         <div data-role="content">
             <div class="content-primary">
 
-                <form id="JellyFedConfigForm">
+                <style>
+                    .jf-tabs { display:flex; gap:.5em; border-bottom:1px solid #444; margin-bottom:1.5em; flex-wrap:wrap; }
+                    .jf-tab { background:transparent; color:#ccc; border:0; padding:.6em 1em; cursor:pointer; font-size:1em; border-bottom:2px solid transparent; }
+                    .jf-tab.active { color:#fff; border-bottom-color:#00a4dc; }
+                    .jf-tab:hover { color:#fff; }
+                    .jf-tab-panel { display:none; }
+                    .jf-tab-panel.active { display:block; }
+                    .jf-peer-card { border:1px solid #333; border-radius:6px; padding:1em; margin-bottom:1em; background:rgba(255,255,255,.02); }
+                    .jf-peer-head { display:flex; align-items:center; gap:.75em; flex-wrap:wrap; }
+                    .jf-dot { display:inline-block; width:.65em; height:.65em; border-radius:50%; background:#666; flex-shrink:0; }
+                    .jf-dot.online { background:#5cb85c; box-shadow:0 0 6px rgba(92,184,92,.6); }
+                    .jf-dot.offline { background:#888; }
+                    .jf-peer-name { font-size:1.1em; font-weight:600; }
+                    .jf-peer-url { color:#aaa; font-size:.85em; }
+                    .jf-badge { display:inline-block; padding:.1em .5em; border-radius:3px; font-size:.75em; background:#333; color:#ccc; }
+                    .jf-badge.ok { background:#2d5a2d; color:#cfe5cf; }
+                    .jf-badge.failed { background:#5a2d2d; color:#e5cfcf; }
+                    .jf-badge.never { background:#333; color:#888; }
+                    .jf-peer-meta { color:#aaa; font-size:.85em; margin-top:.4em; }
+                    .jf-peer-counts { margin-top:.5em; font-family:monospace; font-size:.9em; color:#ccc; }
+                    .jf-peer-toggles { margin-top:.5em; display:flex; gap:1.25em; flex-wrap:wrap; }
+                    .jf-peer-toggles label { display:inline-flex; align-items:center; gap:.3em; font-size:.9em; cursor:pointer; }
+                    .jf-peer-actions { margin-top:.75em; display:flex; gap:.5em; flex-wrap:wrap; }
+                    .jf-peer-details { margin-top:.75em; padding-top:.75em; border-top:1px dashed #333; display:none; font-size:.85em; color:#bbb; }
+                    .jf-peer-details.open { display:block; }
+                    .jf-peer-details code { background:#1a1a1a; padding:.1em .4em; border-radius:3px; font-size:.85em; }
+                    .jf-peer-error { margin-top:.5em; color:#e07070; font-size:.85em; font-family:monospace; white-space:pre-wrap; word-break:break-word; }
+                    .jf-modal-backdrop { position:fixed; inset:0; background:rgba(0,0,0,.6); display:none; align-items:center; justify-content:center; z-index:9999; }
+                    .jf-modal-backdrop.open { display:flex; }
+                    .jf-modal { background:#1e1e1e; border:1px solid #444; border-radius:6px; padding:1.5em; min-width:320px; max-width:90vw; }
+                    .jf-readme-section { margin-bottom:1.5em; }
+                    .jf-readme-section pre { background:#111; border:1px solid #333; border-radius:4px; padding:1em; overflow:auto; font-size:.85em; line-height:1.4; }
+                    .jf-readme-section ol { padding-left:1.5em; line-height:1.8; }
+                    .jf-readme-section code { background:#1a1a1a; padding:.1em .4em; border-radius:3px; }
+                </style>
 
-                    <div class="sectionTitleContainer flex align-items-center">
-                        <h2 class="sectionTitle">JellyFed — Federation Settings</h2>
+                <div class="sectionTitleContainer flex align-items-center">
+                    <h1 class="sectionTitle">JellyFed</h1>
+                </div>
+
+                <div class="jf-tabs" role="tablist">
+                    <button type="button" class="jf-tab active" data-tab="readme">Readme</button>
+                    <button type="button" class="jf-tab" data-tab="settings">Settings</button>
+                    <button type="button" class="jf-tab" data-tab="peers">Peers</button>
+                    <button type="button" class="jf-tab" data-tab="danger">Danger Zone</button>
+                </div>
+
+                <!-- ══════════════ Readme tab ══════════════ -->
+                <section class="jf-tab-panel active" data-panel="readme">
+
+                    <div class="jf-readme-section">
+                        <h2>Federation native d'instances Jellyfin</h2>
+                        <p>
+                            JellyFed connecte plusieurs serveurs Jellyfin entre eux. Depuis un seul client, tu accèdes aux
+                            bibliothèques de toutes les instances fédérées — avec artwork, métadonnées, pistes audio/sous-titres
+                            et transcodage HLS — de façon transparente pour tous les clients officiels.
+                        </p>
                     </div>
 
-                    <div class="inputContainer">
-                        <label class="inputLabel inputLabelUnfocused" for="federationToken">
-                            Federation Token (this instance)
-                        </label>
-                        <div style="display:flex;gap:.5em;align-items:center;">
-                            <input id="federationToken" type="text" class="emby-input" readonly
-                                   style="flex:1;font-family:monospace;cursor:default;" />
-                            <button type="button" id="copyTokenBtn" class="emby-button raised" style="white-space:nowrap;">
-                                <span>Copy</span>
+                    <div class="jf-readme-section">
+                        <h3>Concept</h3>
+<pre>[Client Jellyfin]
+       |
+       v
+[Instance A  &lt;---- JellyFed ----&gt;  Instance B]
+       |                                 |
+  Bibliothèque A                   Bibliothèque B
+  (locale)                         (partagée via .strm + NFO)</pre>
+                        <p>
+                            L'instance A installe JellyFed et se connecte à l'instance B. Le plugin synchronise le catalogue
+                            de B dans A sous forme de <code>.strm</code> + <code>.nfo</code>. Les clients voient les médias de B
+                            comme s'ils étaient locaux.
+                        </p>
+                    </div>
+
+                    <div class="jf-readme-section">
+                        <h3>Setup rapide</h3>
+                        <ol>
+                            <li>
+                                Onglet <strong>Settings</strong> : copie ton <em>Federation Token</em> (auto-généré) et
+                                partage-le avec tes peers — ils en auront besoin pour ajouter ta machine.
+                            </li>
+                            <li>
+                                Remplis <code>Instance Name</code>, <code>Self URL</code> (URL accessible depuis tes peers) et
+                                les racines <code>Movies / Series / Anime</code>. Optionnel : <code>Jellyfin API Key</code>
+                                pour du transcodage HLS natif.
+                            </li>
+                            <li>
+                                Onglet <strong>Peers</strong> → <em>Add peer</em>. Renseigne le nom, l'URL et le token
+                                partagés par le peer distant. L'auto-registration prévient l'autre côté automatiquement.
+                            </li>
+                            <li>
+                                Ajoute des bibliothèques Jellyfin pointant vers <code>{MoviesRoot}</code>, <code>{SeriesRoot}</code>
+                                et <code>{AnimeRoot}</code> (types Films / Séries selon ton usage). Les <code>.strm</code> sont
+                                rangés par peer dans <code>{Racine}/{NomDuPeer}/</code>.
+                            </li>
+                        </ol>
+                    </div>
+
+                    <div class="jf-readme-section">
+                        <h3>Documentation complète</h3>
+                        <ul>
+                            <li><a href="https://github.com/qcormand/JellyFed#readme" target="_blank" rel="noopener noreferrer">README sur GitHub</a></li>
+                            <li><a href="https://github.com/qcormand/JellyFed/blob/main/docs/architecture.md" target="_blank" rel="noopener noreferrer">Architecture technique</a></li>
+                            <li><a href="https://github.com/qcormand/JellyFed/blob/main/docs/api.md" target="_blank" rel="noopener noreferrer">Référence API</a></li>
+                            <li><a href="https://github.com/qcormand/JellyFed/blob/main/docs/strm.md" target="_blank" rel="noopener noreferrer">Format .strm / NFO</a></li>
+                        </ul>
+                    </div>
+
+                </section>
+
+                <!-- ══════════════ Settings tab ══════════════ -->
+                <section class="jf-tab-panel" data-panel="settings">
+
+                    <form id="JellyFedConfigForm">
+
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="federationToken">
+                                Federation Token (this instance)
+                            </label>
+                            <div style="display:flex;gap:.5em;align-items:center;">
+                                <input id="federationToken" type="text" class="emby-input" readonly
+                                       style="flex:1;font-family:monospace;cursor:default;" />
+                                <button type="button" id="copyTokenBtn" class="emby-button raised" style="white-space:nowrap;">
+                                    <span>Copy</span>
+                                </button>
+                            </div>
+                            <div class="fieldDescription">
+                                Auto-generated. Share this token with peers — they must enter it when adding you as a peer.
+                            </div>
+                        </div>
+
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="syncIntervalHours">
+                                Sync Interval (hours)
+                            </label>
+                            <input id="syncIntervalHours" name="SyncIntervalHours" type="number"
+                                   class="emby-input" min="1" max="168" />
+                        </div>
+
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="libraryPath">
+                                Metadata path (manifest &amp; peer state)
+                            </label>
+                            <input id="libraryPath" name="LibraryPath" type="text"
+                                   class="emby-input" placeholder="/config/data/jellyfed-library" />
+                            <div class="fieldDescription">
+                                Directory for <code>.jellyfed-manifest.json</code> and <code>.jellyfed-peers.json</code> only.
+                                Default is under Jellyfin data. Movies / series / anime .strm trees use the roots below (each with a subfolder per peer).
+                            </div>
+                        </div>
+
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="moviesRootPath">Movies root path</label>
+                            <input id="moviesRootPath" name="MoviesRootPath" type="text" class="emby-input"
+                                   placeholder="(default: Metadata path/Films)" />
+                            <div class="fieldDescription">
+                                Absolute folder for federated <strong>movies</strong>. Each peer gets <code>{MoviesRoot}/{PeerName}/…</code>.
+                            </div>
+                        </div>
+
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="seriesRootPath">TV series root path</label>
+                            <input id="seriesRootPath" name="SeriesRootPath" type="text" class="emby-input"
+                                   placeholder="(default: Metadata path/Series)" />
+                            <div class="fieldDescription">
+                                Absolute folder for federated <strong>TV series</strong>. Layout <code>{SeriesRoot}/{PeerName}/…</code>.
+                            </div>
+                        </div>
+
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="animeRootPath">Anime root path</label>
+                            <input id="animeRootPath" name="AnimeRootPath" type="text" class="emby-input"
+                                   placeholder="(default: Metadata path/Animes)" />
+                            <div class="fieldDescription">
+                                Absolute folder for items whose genres include an anime tag. Layout <code>{AnimeRoot}/{PeerName}/…</code>.
+                            </div>
+                        </div>
+
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="selfName">Instance Name</label>
+                            <input id="selfName" name="SelfName" type="text" class="emby-input" placeholder="my-server" />
+                            <div class="fieldDescription">
+                                Name used when this instance registers itself on peers. Appears as the peer name on their end.
+                            </div>
+                        </div>
+
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="jellyfinApiKey">Jellyfin API Key (this instance)</label>
+                            <input id="jellyfinApiKey" name="JellyfinApiKey" type="password"
+                                   class="emby-input" placeholder="Paste a Jellyfin API key" />
+                            <div class="fieldDescription">
+                                Used server-side to redirect streams through Jellyfin's native pipeline —
+                                enables transcoding for all formats. Never stored in .strm files.
+                                Create one in <strong>Dashboard → API Keys</strong>, then paste it here.
+                            </div>
+                        </div>
+
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="selfUrl">Self URL</label>
+                            <input id="selfUrl" name="SelfUrl" type="text" class="emby-input" placeholder="http://my-jellyfin:8096" />
+                            <div class="fieldDescription">
+                                URL by which this instance is reachable from peers. Used for automatic bidirectional registration.
+                            </div>
+                        </div>
+
+                        <div style="margin-top: 1.5em;">
+                            <button type="submit" class="emby-button raised button-submit">
+                                <span>Save</span>
                             </button>
                         </div>
-                        <div class="fieldDescription">
-                            Auto-generated. Share this token with peers — they must enter it when adding you as a peer.
+
+                    </form>
+                </section>
+
+                <!-- ══════════════ Peers tab ══════════════ -->
+                <section class="jf-tab-panel" data-panel="peers">
+
+                    <div style="display:flex;align-items:center;gap:.75em;flex-wrap:wrap;margin-bottom:1em;">
+                        <div id="peersHeaderStatus" style="flex:1;color:#aaa;font-size:.9em;">
+                            Loading peers…
                         </div>
-                    </div>
-
-                    <div class="inputContainer">
-                        <label class="inputLabel inputLabelUnfocused" for="syncIntervalHours">
-                            Sync Interval (hours)
-                        </label>
-                        <input id="syncIntervalHours" name="SyncIntervalHours" type="number"
-                               class="emby-input" min="1" max="168" />
-                    </div>
-
-                    <div class="inputContainer">
-                        <label class="inputLabel inputLabelUnfocused" for="libraryPath">
-                            Library Path
-                        </label>
-                        <input id="libraryPath" name="LibraryPath" type="text"
-                               class="emby-input" placeholder="/config/jellyfed-library" />
-                        <div class="fieldDescription">
-                            Local directory where .strm files and metadata will be written.
-                        </div>
-                    </div>
-
-                    <div class="inputContainer">
-                        <label class="inputLabel inputLabelUnfocused" for="selfName">
-                            Instance Name
-                        </label>
-                        <input id="selfName" name="SelfName" type="text"
-                               class="emby-input" placeholder="my-server" />
-                        <div class="fieldDescription">
-                            Name used when this instance registers itself on peers. Appears as the peer name on their end.
-                        </div>
-                    </div>
-
-                    <div class="inputContainer">
-                        <label class="inputLabel inputLabelUnfocused" for="jellyfinApiKey">
-                            Jellyfin API Key (this instance)
-                        </label>
-                        <input id="jellyfinApiKey" name="JellyfinApiKey" type="password"
-                               class="emby-input" placeholder="Paste a Jellyfin API key" />
-                        <div class="fieldDescription">
-                            Used server-side to redirect streams through Jellyfin's native pipeline —
-                            enables transcoding for all formats (MKV, HEVC, …). Never stored in .strm files.
-                            Create one in <strong>Dashboard → API Keys</strong>, then paste it here.
-                        </div>
-                    </div>
-
-                    <div class="inputContainer">
-                        <label class="inputLabel inputLabelUnfocused" for="selfUrl">
-                            Self URL
-                        </label>
-                        <input id="selfUrl" name="SelfUrl" type="text"
-                               class="emby-input" placeholder="http://my-jellyfin:8096" />
-                        <div class="fieldDescription">
-                            URL by which this instance is reachable from peers. Used for automatic bidirectional registration.
-                        </div>
-                    </div>
-
-                    <!-- ── Peers ─────────────────────────────────────────── -->
-
-                    <div class="sectionTitleContainer" style="margin-top: 2em;">
-                        <h2 class="sectionTitle">Peers</h2>
+                        <button type="button" id="syncAllBtn" class="emby-button raised">
+                            <span>Sync all</span>
+                        </button>
+                        <button type="button" id="refreshPeersBtn" class="emby-button raised">
+                            <span>Refresh</span>
+                        </button>
+                        <button type="button" id="openAddPeerBtn" class="emby-button raised">
+                            <span>Add peer</span>
+                        </button>
                     </div>
 
                     <div id="peersContainer">
-                        <!-- Peers rendered by JS -->
+                        <!-- Peer cards rendered here by JS -->
                     </div>
 
-                    <button id="addPeerBtn" type="button" class="emby-button raised">
-                        <span>Add Peer</span>
-                    </button>
-
-                    <!-- ── Blocked Peers (FEAT-01) ────────────────────────── -->
+                    <p id="peersEmpty" style="display:none;color:#888;">No peers configured yet. Click <strong>Add peer</strong>.</p>
 
                     <div class="sectionTitleContainer" style="margin-top: 2em;">
-                        <h2 class="sectionTitle">Blocked Peers</h2>
+                        <h2 class="sectionTitle">Blocked peers</h2>
                     </div>
 
                     <div class="fieldDescription" style="margin-bottom: 1em;">
                         Peers that were manually removed. They cannot auto-register again unless unblocked.
                     </div>
 
-                    <div id="blockedPeersContainer">
-                        <!-- Rendered by JS -->
-                    </div>
+                    <div id="blockedPeersContainer"></div>
+                    <p id="blockedPeersEmpty" style="display:none;color:#888;">No blocked peers.</p>
 
-                    <p id="blockedPeersEmpty" style="display:none; color:#888;">No blocked peers.</p>
-
-                    <!-- ── Save ───────────────────────────────────────────── -->
-
-                    <div style="margin-top: 1.5em;">
-                        <button type="submit" class="emby-button raised button-submit">
-                            <span>Save</span>
+                    <div style="margin-top:1em;">
+                        <button type="button" id="saveBlockedBtn" class="emby-button raised">
+                            <span>Save blocked list</span>
                         </button>
+                        <span id="blockedStatus" style="color:#aaa;font-size:.9em;margin-left:.75em;"></span>
                     </div>
 
-                </form>
+                </section>
 
-                <!-- ── Sync (FEAT-02) — outside form to avoid submit ─────── -->
+                <!-- ══════════════ Danger Zone tab ══════════════ -->
+                <section class="jf-tab-panel" data-panel="danger">
 
-                <div class="sectionTitleContainer" style="margin-top: 2em;">
-                    <h2 class="sectionTitle">Sync</h2>
-                </div>
+                    <div class="sectionTitleContainer">
+                        <h2 class="sectionTitle" style="color:#e07070;">Danger Zone</h2>
+                    </div>
 
-                <div style="display: flex; align-items: center; gap: 1em; flex-wrap: wrap;">
-                    <button id="syncAllBtn" type="button" class="emby-button raised">
-                        <span>Sync Now (all peers)</span>
+                    <div class="fieldDescription" style="margin-bottom: 1em;">
+                        Resetting the network generates a new federation token, removes all peers and deletes all synced
+                        .strm files locally. Remote instances that had you as a peer will receive 401 errors and
+                        clean up automatically on their next sync. Use this if your token leaked or too many
+                        stale peers accumulated.
+                    </div>
+
+                    <button id="resetNetworkBtn" type="button" class="emby-button raised button-cancel">
+                        <span>Reset Network</span>
                     </button>
-                    <span id="syncStatus" style="color:#aaa; font-size:.9em;"></span>
+
+                </section>
+
+                <!-- ══════════════ Add peer modal ══════════════ -->
+                <div id="addPeerModal" class="jf-modal-backdrop">
+                    <div class="jf-modal">
+                        <h3 style="margin-top:0;">Add peer</h3>
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="addPeerName">Name</label>
+                            <input id="addPeerName" type="text" class="emby-input" placeholder="friend-server" />
+                        </div>
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="addPeerUrl">URL</label>
+                            <input id="addPeerUrl" type="text" class="emby-input" placeholder="https://friend.example.com:8096" />
+                        </div>
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="addPeerToken">Federation token</label>
+                            <input id="addPeerToken" type="password" class="emby-input" placeholder="Token shared by the peer" />
+                        </div>
+                        <div id="addPeerStatus" style="min-height:1.2em;color:#aaa;font-size:.9em;white-space:pre-wrap;"></div>
+                        <div style="display:flex;gap:.5em;justify-content:flex-end;margin-top:1em;flex-wrap:wrap;">
+                            <button type="button" id="addPeerCancelBtn" class="emby-button raised">
+                                <span>Cancel</span>
+                            </button>
+                            <button type="button" id="addPeerTestBtn" class="emby-button raised">
+                                <span>Test connection</span>
+                            </button>
+                            <button type="button" id="addPeerConfirmBtn" class="emby-button raised button-submit">
+                                <span>Add</span>
+                            </button>
+                        </div>
+                    </div>
                 </div>
-
-                <!-- ── Synced Catalogue (FEAT-06) ─────────────────────────── -->
-
-                <div class="sectionTitleContainer" style="margin-top: 2em;">
-                    <h2 class="sectionTitle">Synced Catalogue</h2>
-                </div>
-
-                <div class="fieldDescription" style="margin-bottom: 1em;">
-                    Items currently synced from each peer. Purging removes all .strm files for that peer.
-                </div>
-
-                <div id="catalogueStatsContainer">
-                    <!-- Rendered by JS -->
-                </div>
-
-                <p id="catalogueStatsEmpty" style="display:none; color:#888;">No synced items yet.</p>
-
-                <!-- ── Danger Zone ────────────────────────────────────────── -->
-
-                <div class="sectionTitleContainer" style="margin-top: 2em;">
-                    <h2 class="sectionTitle" style="color:#e07070;">Danger Zone</h2>
-                </div>
-
-                <div class="fieldDescription" style="margin-bottom: 1em;">
-                    Resetting the network generates a new federation token, removes all peers and deletes all synced
-                    .strm files locally. Remote instances that had you as a peer will receive 401 errors and
-                    clean up automatically on their next sync. Use this if your token leaked or too many
-                    stale peers accumulated.
-                </div>
-
-                <button id="resetNetworkBtn" type="button" class="emby-button raised button-cancel">
-                    <span>Reset Network</span>
-                </button>
 
             </div>
         </div>
@@ -179,396 +327,617 @@
             (function () {
                 var pluginId = 'ff0164d7-e8c0-44c1-bc61-45017125a155';
                 var config = {};
+                var peerDetailsCache = [];
 
-                // Détecte le base path de Jellyfin (ex: "/test/a" si BaseUrl configuré,
-                // "" si accès direct sur port). Permet aux fetch de fonctionner
-                // que ce soit via un reverse proxy avec sub-path ou en accès direct.
-                // window.location.pathname = "/test/a/web/configurationpage?..."
+                // Base-path aware fetch helper (supports Jellyfin behind a reverse proxy with sub-path).
                 var _basePath = window.location.pathname.split('/web/')[0].replace(/\/$/, '');
-                function jellyFedUrl(path) {
-                    return _basePath + path;
+                function jellyFedUrl(path) { return _basePath + path; }
+                console.log('[JellyFed] basePath:', _basePath || '(root)');
+
+                // ── Helpers ───────────────────────────────────────────────────
+                function escHtml(str) {
+                    return String(str == null ? '' : str)
+                        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
                 }
-                console.log('[JellyFed] basePath détecté :', _basePath || '(root)');
 
-                // ── Peers ────────────────────────────────────────────────────
+                // Jellyfin picks PascalCase or camelCase JSON via content-negotiation depending on
+                // the requesting client. Plugin pages can land on either profile, so every DTO field
+                // must be read through this case-insensitive accessor.
+                function pick(obj, key) {
+                    if (obj == null) { return undefined; }
+                    if (Object.prototype.hasOwnProperty.call(obj, key)) { return obj[key]; }
+                    var lower = key.charAt(0).toLowerCase() + key.slice(1);
+                    if (Object.prototype.hasOwnProperty.call(obj, lower)) { return obj[lower]; }
+                    var upper = key.charAt(0).toUpperCase() + key.slice(1);
+                    if (Object.prototype.hasOwnProperty.call(obj, upper)) { return obj[upper]; }
+                    return undefined;
+                }
 
-                function renderPeers(page, peers) {
-                    var container = page.querySelector('#peersContainer');
-                    if (!container) { return; }
-                    container.innerHTML = '';
-                    peers.forEach(function (peer, i) {
-                        var fs = document.createElement('fieldset');
-                        fs.style.cssText = 'border:1px solid #444;padding:1em;margin-bottom:1em';
-                        fs.innerHTML = '<legend>Peer #' + (i + 1) + '</legend>'
-                            + '<div class="inputContainer"><label>Name</label><input class="emby-input peer-name" /></div>'
-                            + '<div class="inputContainer"><label>URL</label><input class="emby-input peer-url" /></div>'
-                            + '<div class="inputContainer"><label>Federation Token</label><input class="emby-input peer-token" type="password" /></div>'
-                            + '<label><input type="checkbox" class="peer-enabled" /> Enabled</label> '
-                            + '<label><input type="checkbox" class="peer-movies" /> Sync Movies</label> '
-                            + '<label><input type="checkbox" class="peer-series" /> Sync Series</label> '
-                            + '<div style="margin-top:.75em;display:flex;gap:.5em;flex-wrap:wrap;">'
-                            + '<button type="button" class="emby-button raised button-cancel remove-peer"><span>Remove</span></button>'
-                            + '<button type="button" class="emby-button raised sync-peer-btn"><span>Sync</span></button>'
-                            + '</div>';
+                function normalizePeer(raw) {
+                    // Returns a peer shape with lowerCamelCase fields regardless of server casing.
+                    return {
+                        name: pick(raw, 'name'),
+                        url: pick(raw, 'url'),
+                        enabled: pick(raw, 'enabled'),
+                        syncMovies: pick(raw, 'syncMovies'),
+                        syncSeries: pick(raw, 'syncSeries'),
+                        syncAnime: pick(raw, 'syncAnime'),
+                        hasAccessToken: pick(raw, 'hasAccessToken'),
+                        online: pick(raw, 'online'),
+                        lastSeen: pick(raw, 'lastSeen'),
+                        version: pick(raw, 'version'),
+                        lastSyncAt: pick(raw, 'lastSyncAt'),
+                        lastSyncStatus: pick(raw, 'lastSyncStatus') || 'never',
+                        lastSyncError: pick(raw, 'lastSyncError'),
+                        lastSyncDurationMs: pick(raw, 'lastSyncDurationMs') || 0,
+                        peerMovieCount: pick(raw, 'peerMovieCount') || 0,
+                        peerSeriesCount: pick(raw, 'peerSeriesCount') || 0,
+                        localMovieCount: pick(raw, 'localMovieCount') || 0,
+                        localSeriesCount: pick(raw, 'localSeriesCount') || 0,
+                        localAnimeCount: pick(raw, 'localAnimeCount') || 0,
+                        localDiskBytes: pick(raw, 'localDiskBytes') || 0,
+                        moviesFolder: pick(raw, 'moviesFolder'),
+                        seriesFolder: pick(raw, 'seriesFolder'),
+                        animeFolder: pick(raw, 'animeFolder')
+                    };
+                }
 
-                        fs.querySelector('.peer-name').value = peer.Name || peer.name || '';
-                        fs.querySelector('.peer-url').value = peer.Url || peer.url || '';
-                        fs.querySelector('.peer-token').value = peer.FederationToken || peer.federationToken || '';
-                        fs.querySelector('.peer-enabled').checked = !!(peer.Enabled || peer.enabled);
-                        fs.querySelector('.peer-movies').checked = !!(peer.SyncMovies || peer.syncMovies);
-                        fs.querySelector('.peer-series').checked = !!(peer.SyncSeries || peer.syncSeries);
+                function formatBytes(bytes) {
+                    if (!bytes || bytes <= 0) { return '0 B'; }
+                    var units = ['B', 'KB', 'MB', 'GB', 'TB'];
+                    var i = Math.floor(Math.log(bytes) / Math.log(1024));
+                    i = Math.min(i, units.length - 1);
+                    return (bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1) + ' ' + units[i];
+                }
 
-                        fs.querySelector('.remove-peer').addEventListener('click', function () {
-                            var peerName = fs.querySelector('.peer-name').value;
-                            var url = fs.querySelector('.peer-url').value;
-                            var removeBtn = fs.querySelector('.remove-peer');
-                            console.log('[JellyFed] removePeer — "' + peerName + '" (' + url + ')');
+                function formatRelative(iso) {
+                    if (!iso) { return 'never'; }
+                    var t = Date.parse(iso);
+                    if (isNaN(t)) { return iso; }
+                    var diff = (Date.now() - t) / 1000;
+                    if (diff < 60) { return 'just now'; }
+                    if (diff < 3600) { return Math.floor(diff / 60) + ' min ago'; }
+                    if (diff < 86400) { return Math.floor(diff / 3600) + ' h ago'; }
+                    return Math.floor(diff / 86400) + ' d ago';
+                }
 
-                            function doRemove() {
-                                if (url) {
-                                    var marker = document.createElement('span');
-                                    marker.setAttribute('data-blocked-url', url);
-                                    marker.style.display = 'none';
-                                    page.querySelector('#peersContainer').appendChild(marker);
-                                    console.log('[JellyFed] removePeer — URL blacklistée : ' + url);
-                                }
-                                fs.remove();
-                                console.log('[JellyFed] removePeer — fieldset supprimé');
-                            }
+                function formatDuration(ms) {
+                    if (!ms || ms <= 0) { return '—'; }
+                    if (ms < 1000) { return ms + ' ms'; }
+                    if (ms < 60000) { return (ms / 1000).toFixed(1) + ' s'; }
+                    return Math.floor(ms / 60000) + 'm ' + Math.floor((ms % 60000) / 1000) + 's';
+                }
 
-                            // Si pas de nom ou pas de token configuré, retrait simple sans purge
-                            var token = page.querySelector('#federationToken').value;
-                            if (!peerName || !token) {
-                                console.log('[JellyFed] removePeer — pas de nom/token, retrait simple sans purge');
-                                doRemove();
-                                return;
-                            }
+                function getToken() {
+                    return document.querySelector('#federationToken').value;
+                }
 
-                            removeBtn.disabled = true;
-                            removeBtn.querySelector('span').textContent = 'Suppression…';
+                function authHeaders(json) {
+                    var h = { 'Authorization': 'Bearer ' + getToken() };
+                    if (json) { h['Content-Type'] = 'application/json'; }
+                    return h;
+                }
 
-                            console.log('[JellyFed] removePeer — POST /JellyFed/peer/purge pour "' + peerName + '"');
-                            fetch(jellyFedUrl('/JellyFed/peer/purge'), {
-                                method: 'POST',
-                                headers: {
-                                    'Content-Type': 'application/json',
-                                    'Authorization': 'Bearer ' + token
-                                },
-                                body: JSON.stringify({ peerName: peerName })
-                            }).then(function (r) {
-                                return r.ok ? r.json() : Promise.reject('HTTP ' + r.status);
-                            }).then(function (result) {
-                                console.log('[JellyFed] removePeer — purge OK:', result);
-                                doRemove();
-                            }).catch(function (err) {
-                                console.warn('[JellyFed] removePeer — purge failed (' + err + '), retrait quand même');
-                                doRemove();
-                            });
-                        });
-
-                        fs.querySelector('.sync-peer-btn').addEventListener('click', function () {
-                            var peerName = fs.querySelector('.peer-name').value;
-                            triggerSync(page, peerName || null);
-                        });
-
-                        container.appendChild(fs);
+                // ── Tabs ──────────────────────────────────────────────────────
+                function activateTab(page, tabId) {
+                    page.querySelectorAll('.jf-tab').forEach(function (btn) {
+                        btn.classList.toggle('active', btn.getAttribute('data-tab') === tabId);
                     });
-                }
-
-                function collectPeers(page) {
-                    return Array.from(page.querySelectorAll('#peersContainer fieldset')).map(function (fs) {
-                        return {
-                            Name: fs.querySelector('.peer-name').value,
-                            Url: fs.querySelector('.peer-url').value,
-                            FederationToken: fs.querySelector('.peer-token').value,
-                            Enabled: fs.querySelector('.peer-enabled').checked,
-                            SyncMovies: fs.querySelector('.peer-movies').checked,
-                            SyncSeries: fs.querySelector('.peer-series').checked
-                        };
+                    page.querySelectorAll('.jf-tab-panel').forEach(function (panel) {
+                        panel.classList.toggle('active', panel.getAttribute('data-panel') === tabId);
                     });
+                    if (tabId === 'peers') {
+                        loadPeerDetails(page);
+                    }
                 }
 
-                function collectBlockedUrls(page) {
-                    return Array.from(page.querySelectorAll('#peersContainer [data-blocked-url]'))
-                        .map(function (el) { return el.getAttribute('data-blocked-url'); });
-                }
-
-                // ── Blocked Peers (FEAT-01) ──────────────────────────────────
-
-                function renderBlockedPeers(page, blockedUrls) {
-                    var container = page.querySelector('#blockedPeersContainer');
-                    var emptyMsg = page.querySelector('#blockedPeersEmpty');
-                    if (!container) { return; }
-                    container.innerHTML = '';
-
-                    if (!blockedUrls || blockedUrls.length === 0) {
-                        emptyMsg.style.display = 'block';
+                // ── Peers tab ─────────────────────────────────────────────────
+                function loadPeerDetails(page) {
+                    var token = getToken();
+                    if (!token) {
+                        page.querySelector('#peersHeaderStatus').textContent =
+                            'Federation token not set. Finish Settings tab first.';
                         return;
                     }
-                    emptyMsg.style.display = 'none';
+                    fetch(jellyFedUrl('/JellyFed/peers/details'), {
+                        headers: authHeaders(false)
+                    }).then(function (r) {
+                        if (!r.ok) { throw new Error('HTTP ' + r.status); }
+                        return r.json();
+                    }).then(function (data) {
+                        console.log('[JellyFed] peers/details raw response:', data);
+                        var rawPeers = pick(data, 'peers') || [];
+                        peerDetailsCache = rawPeers.map(normalizePeer);
+                        var lastGlobal = pick(data, 'lastGlobalSyncAt');
+                        console.log('[JellyFed] peers/details —', peerDetailsCache.length + ' peer(s); lastGlobalSyncAt=', lastGlobal);
+                        renderPeerDetails(page, peerDetailsCache, lastGlobal);
+                        loadBlocked(page);
+                    }).catch(function (err) {
+                        console.error('[JellyFed] peers/details — error:', err);
+                        page.querySelector('#peersHeaderStatus').textContent = 'Error: ' + err.message;
+                    });
+                }
 
-                    blockedUrls.forEach(function (url) {
+                function renderPeerDetails(page, peers, lastGlobal) {
+                    var header = page.querySelector('#peersHeaderStatus');
+                    var count = (peers && peers.length) || 0;
+                    var syncPart = lastGlobal
+                        ? 'last sync ' + formatRelative(lastGlobal) + ' (' + new Date(lastGlobal).toLocaleString() + ')'
+                        : 'no sync yet';
+                    header.textContent = count + ' peer' + (count === 1 ? '' : 's') + ' · ' + syncPart;
+
+                    var container = page.querySelector('#peersContainer');
+                    var empty = page.querySelector('#peersEmpty');
+                    container.innerHTML = '';
+
+                    if (!peers || peers.length === 0) {
+                        empty.style.display = 'block';
+                        return;
+                    }
+                    empty.style.display = 'none';
+
+                    peers.forEach(function (peer) {
+                        container.appendChild(buildPeerCard(page, peer));
+                    });
+                }
+
+                function buildPeerCard(page, peer) {
+                    var card = document.createElement('div');
+                    card.className = 'jf-peer-card';
+                    card.setAttribute('data-peer-name', peer.name);
+
+                    var onlineClass = peer.online ? 'online' : 'offline';
+                    var statusClass = peer.lastSyncStatus || 'never';
+                    var versionLabel = peer.version ? 'v' + escHtml(peer.version) : 'version unknown';
+
+                    card.innerHTML =
+                        '<div class="jf-peer-head">' +
+                            '<span class="jf-dot ' + onlineClass + '" title="' + (peer.online ? 'Online' : 'Offline') + '"></span>' +
+                            '<span class="jf-peer-name">' + escHtml(peer.name) + '</span>' +
+                            '<span class="jf-badge">' + versionLabel + '</span>' +
+                            (peer.online ? '' : '<span class="jf-badge" title="Last seen">offline</span>') +
+                        '</div>' +
+                        '<div class="jf-peer-url">' + escHtml(peer.url) + '</div>' +
+                        '<div class="jf-peer-meta">' +
+                            'Last sync: <span class="jf-badge ' + statusClass + '">' + statusClass + '</span> ' +
+                            escHtml(peer.lastSyncAt ? formatRelative(peer.lastSyncAt) : 'never') +
+                            (peer.lastSyncDurationMs ? ' · ' + formatDuration(peer.lastSyncDurationMs) : '') +
+                            ' · Last seen: ' + escHtml(peer.lastSeen ? formatRelative(peer.lastSeen) : 'never') +
+                        '</div>' +
+                        (peer.lastSyncError
+                            ? '<div class="jf-peer-error">' + escHtml(peer.lastSyncError) + '</div>'
+                            : '') +
+                        '<div class="jf-peer-counts">' +
+                            'Peer: ' + (peer.peerMovieCount || 0) + 'M / ' + (peer.peerSeriesCount || 0) + 'S · ' +
+                            'Local: ' + (peer.localMovieCount || 0) + 'M / ' + (peer.localSeriesCount || 0) + 'S / ' + (peer.localAnimeCount || 0) + 'A · ' +
+                            escHtml(formatBytes(peer.localDiskBytes || 0)) +
+                        '</div>' +
+                        '<div class="jf-peer-toggles">' +
+                            '<label><input type="checkbox" class="jf-t-enabled" ' + (peer.enabled ? 'checked' : '') + ' /> Enabled</label>' +
+                            '<label><input type="checkbox" class="jf-t-movies" ' + (peer.syncMovies ? 'checked' : '') + ' /> Films</label>' +
+                            '<label><input type="checkbox" class="jf-t-series" ' + (peer.syncSeries ? 'checked' : '') + ' /> Séries</label>' +
+                            '<label><input type="checkbox" class="jf-t-anime" ' + (peer.syncAnime ? 'checked' : '') + ' /> Anime</label>' +
+                        '</div>' +
+                        '<div class="jf-peer-actions">' +
+                            '<button type="button" class="emby-button raised jf-resync"><span>Resync</span></button>' +
+                            '<button type="button" class="emby-button raised jf-purge"><span>Purge .strm</span></button>' +
+                            '<button type="button" class="emby-button raised jf-edit"><span>Edit</span></button>' +
+                            '<button type="button" class="emby-button raised jf-details-toggle"><span>Details</span></button>' +
+                            '<button type="button" class="emby-button raised button-cancel jf-remove"><span>Remove</span></button>' +
+                        '</div>' +
+                        '<div class="jf-peer-details">' +
+                            '<div><strong>Movies folder:</strong> <code>' + escHtml(peer.moviesFolder || '—') + '</code></div>' +
+                            '<div><strong>Series folder:</strong> <code>' + escHtml(peer.seriesFolder || '—') + '</code></div>' +
+                            '<div><strong>Anime folder:</strong> <code>' + escHtml(peer.animeFolder || '—') + '</code></div>' +
+                            '<div style="margin-top:.4em;"><strong>Access token issued:</strong> ' + (peer.hasAccessToken ? 'yes (revocable)' : 'no (global token)') + '</div>' +
+                        '</div>';
+
+                    // Wire card events
+                    card.querySelector('.jf-t-enabled').addEventListener('change', function (e) {
+                        patchPeer(page, peer.name, { Enabled: e.target.checked });
+                    });
+                    card.querySelector('.jf-t-movies').addEventListener('change', function (e) {
+                        patchPeer(page, peer.name, { SyncMovies: e.target.checked });
+                    });
+                    card.querySelector('.jf-t-series').addEventListener('change', function (e) {
+                        patchPeer(page, peer.name, { SyncSeries: e.target.checked });
+                    });
+                    card.querySelector('.jf-t-anime').addEventListener('change', function (e) {
+                        patchPeer(page, peer.name, { SyncAnime: e.target.checked });
+                    });
+                    card.querySelector('.jf-resync').addEventListener('click', function (ev) {
+                        resyncPeer(page, peer.name, ev.currentTarget);
+                    });
+                    card.querySelector('.jf-purge').addEventListener('click', function (ev) {
+                        purgePeer(page, peer.name, ev.currentTarget);
+                    });
+                    card.querySelector('.jf-edit').addEventListener('click', function () {
+                        editPeer(page, peer);
+                    });
+                    card.querySelector('.jf-remove').addEventListener('click', function (ev) {
+                        removePeer(page, peer.name, ev.currentTarget);
+                    });
+                    card.querySelector('.jf-details-toggle').addEventListener('click', function (ev) {
+                        var d = card.querySelector('.jf-peer-details');
+                        d.classList.toggle('open');
+                        ev.currentTarget.querySelector('span').textContent = d.classList.contains('open') ? 'Hide details' : 'Details';
+                    });
+
+                    return card;
+                }
+
+                function patchPeer(page, name, body) {
+                    return fetch(jellyFedUrl('/JellyFed/peer/' + encodeURIComponent(name)), {
+                        method: 'PATCH',
+                        headers: authHeaders(true),
+                        body: JSON.stringify(body)
+                    }).then(function (r) {
+                        if (!r.ok) { throw new Error('HTTP ' + r.status); }
+                        return r.json();
+                    }).then(function () {
+                        console.log('[JellyFed] peer', name, 'patched:', body);
+                    }).catch(function (err) {
+                        console.error('[JellyFed] patch failed:', err);
+                        alert('Update failed: ' + err.message);
+                        loadPeerDetails(page);
+                    });
+                }
+
+                function resyncPeer(page, name, btn) {
+                    btn.disabled = true;
+                    btn.querySelector('span').textContent = 'Syncing…';
+                    fetch(jellyFedUrl('/JellyFed/peer/' + encodeURIComponent(name) + '/sync'), {
+                        method: 'POST',
+                        headers: authHeaders(false)
+                    }).then(function (r) {
+                        if (!r.ok) { throw new Error('HTTP ' + r.status); }
+                        return r.json();
+                    }).then(function (result) {
+                        console.log('[JellyFed] resync', name, result);
+                        var msg = result.status === 'ok'
+                            ? 'Sync OK (+' + result.addedMovies + 'M, +' + result.addedSeries + 'S)'
+                            : 'Sync failed: ' + (result.error || 'unknown');
+                        alert(msg);
+                        loadPeerDetails(page);
+                    }).catch(function (err) {
+                        console.error('[JellyFed] resync error:', err);
+                        alert('Sync error: ' + err.message);
+                    }).finally(function () {
+                        btn.disabled = false;
+                        btn.querySelector('span').textContent = 'Resync';
+                    });
+                }
+
+                function purgePeer(page, name, btn) {
+                    if (!confirm('Delete all .strm files synced from "' + name + '"?\n\nThe peer stays configured; re-sync to rebuild.')) {
+                        return;
+                    }
+                    btn.disabled = true;
+                    btn.querySelector('span').textContent = 'Purging…';
+                    fetch(jellyFedUrl('/JellyFed/peer/' + encodeURIComponent(name) + '/purge'), {
+                        method: 'POST',
+                        headers: authHeaders(false)
+                    }).then(function (r) {
+                        if (!r.ok) { throw new Error('HTTP ' + r.status); }
+                        return r.json();
+                    }).then(function (result) {
+                        console.log('[JellyFed] purge', name, result);
+                        alert('Purged: ' + result.deletedMovies + ' movies, ' + result.deletedSeries + ' series.');
+                        loadPeerDetails(page);
+                    }).catch(function (err) {
+                        console.error('[JellyFed] purge error:', err);
+                        alert('Purge error: ' + err.message);
+                    }).finally(function () {
+                        btn.disabled = false;
+                        btn.querySelector('span').textContent = 'Purge .strm';
+                    });
+                }
+
+                function removePeer(page, name, btn) {
+                    if (!confirm('Remove peer "' + name + '"?\n\nThis deletes all .strm files, revokes the access token and blocks the URL from auto-registration.\n\nThis cannot be undone without unblocking.')) {
+                        return;
+                    }
+                    btn.disabled = true;
+                    btn.querySelector('span').textContent = 'Removing…';
+                    fetch(jellyFedUrl('/JellyFed/peer/' + encodeURIComponent(name) + '/remove'), {
+                        method: 'POST',
+                        headers: authHeaders(false)
+                    }).then(function (r) {
+                        if (!r.ok) { throw new Error('HTTP ' + r.status); }
+                        return r.json();
+                    }).then(function (result) {
+                        console.log('[JellyFed] remove', name, result);
+                        loadPeerDetails(page);
+                    }).catch(function (err) {
+                        console.error('[JellyFed] remove error:', err);
+                        alert('Remove error: ' + err.message);
+                        btn.disabled = false;
+                        btn.querySelector('span').textContent = 'Remove';
+                    });
+                }
+
+                function editPeer(page, peer) {
+                    var newName = prompt('Peer name:', peer.name);
+                    if (newName === null) { return; }
+                    var newUrl = prompt('Peer URL:', peer.url);
+                    if (newUrl === null) { return; }
+                    var newToken = prompt('Federation token (leave blank to keep current):', '');
+                    var body = {};
+                    if (newName && newName !== peer.name) { body.Name = newName; }
+                    if (newUrl && newUrl !== peer.url) { body.Url = newUrl; }
+                    if (newToken) { body.FederationToken = newToken; }
+                    if (Object.keys(body).length === 0) { return; }
+                    patchPeer(page, peer.name, body).then(function () { loadPeerDetails(page); });
+                }
+
+                // ── Blocked peers ────────────────────────────────────────────
+                function loadBlocked(page) {
+                    // The blocked list lives in config; reuse getPluginConfiguration.
+                    ApiClient.getPluginConfiguration(pluginId).then(function (loaded) {
+                        config = loaded;
+                        renderBlockedPeers(page, loaded.BlockedPeerUrls || loaded.blockedPeerUrls || []);
+                    });
+                }
+
+                function renderBlockedPeers(page, urls) {
+                    var container = page.querySelector('#blockedPeersContainer');
+                    var empty = page.querySelector('#blockedPeersEmpty');
+                    container.innerHTML = '';
+                    if (!urls || urls.length === 0) {
+                        empty.style.display = 'block';
+                        return;
+                    }
+                    empty.style.display = 'none';
+                    urls.forEach(function (url) {
                         var row = document.createElement('div');
                         row.style.cssText = 'display:flex;align-items:center;gap:1em;margin-bottom:.5em;';
-                        row.setAttribute('data-blocked-entry', url);
-
-                        var label = document.createElement('span');
-                        label.textContent = url;
-                        label.style.flex = '1';
-
+                        row.setAttribute('data-blocked', url);
+                        row.innerHTML = '<span style="flex:1;font-family:monospace;font-size:.9em;">' +
+                            escHtml(url) + '</span>';
                         var btn = document.createElement('button');
                         btn.type = 'button';
                         btn.className = 'emby-button raised';
                         btn.innerHTML = '<span>Unblock</span>';
-                        btn.addEventListener('click', function () {
-                            row.remove();
-                            if (container.querySelectorAll('[data-blocked-entry]').length === 0) {
-                                emptyMsg.style.display = 'block';
-                            }
-                        });
-
-                        row.appendChild(label);
+                        btn.addEventListener('click', function () { row.remove(); });
                         row.appendChild(btn);
                         container.appendChild(row);
                     });
                 }
 
-                function collectCurrentBlockedUrls(page) {
-                    return Array.from(page.querySelectorAll('#blockedPeersContainer [data-blocked-entry]'))
-                        .map(function (el) { return el.getAttribute('data-blocked-entry'); });
+                function saveBlocked(page) {
+                    var remaining = Array.from(page.querySelectorAll('#blockedPeersContainer [data-blocked]'))
+                        .map(function (r) { return r.getAttribute('data-blocked'); });
+                    var payload = Object.assign({}, config, { BlockedPeerUrls: remaining });
+                    var status = page.querySelector('#blockedStatus');
+                    status.textContent = 'Saving…';
+                    ApiClient.updatePluginConfiguration(pluginId, payload).then(function () {
+                        status.textContent = 'Blocked list updated.';
+                        setTimeout(function () { status.textContent = ''; }, 2500);
+                        loadBlocked(page);
+                    }).catch(function () { status.textContent = 'Error.'; });
                 }
 
-                // ── Synced Catalogue (FEAT-06) ───────────────────────────────
+                // ── Add peer modal ────────────────────────────────────────────
+                function openAddPeer(page) {
+                    page.querySelector('#addPeerName').value = '';
+                    page.querySelector('#addPeerUrl').value = '';
+                    page.querySelector('#addPeerToken').value = '';
+                    page.querySelector('#addPeerStatus').textContent = '';
+                    page.querySelector('#addPeerStatus').style.color = '#aaa';
+                    page.querySelector('#addPeerModal').classList.add('open');
+                }
 
-                function loadManifestStats(page) {
-                    var token = page.querySelector('#federationToken').value;
-                    if (!token) { return; }
+                function closeAddPeer(page) {
+                    page.querySelector('#addPeerModal').classList.remove('open');
+                }
 
-                    fetch(jellyFedUrl('/JellyFed/manifest/stats'), {
-                        headers: { 'Authorization': 'Bearer ' + token }
-                    }).then(function (r) {
-                        if (!r.ok) {
-                            console.warn('[JellyFed] manifest/stats — HTTP ' + r.status);
-                            return null;
+                function readErrorMessage(response) {
+                    // Tries to extract { message } from a JSON error body; falls back to plain text.
+                    return response.text().then(function (txt) {
+                        try {
+                            var body = JSON.parse(txt);
+                            return body.message || body.error || txt || ('HTTP ' + response.status);
+                        } catch (e) {
+                            return txt || ('HTTP ' + response.status);
                         }
-                        return r.json();
-                    }).then(function (data) {
-                        var peers = data && data.peers ? data.peers : [];
-                        console.log('[JellyFed] manifest/stats —', peers.length + ' peer(s):', peers);
-                        renderCatalogueStats(page, peers);
-                    }).catch(function (err) {
-                        console.error('[JellyFed] manifest/stats — error:', err);
                     });
                 }
 
-                function renderCatalogueStats(page, peers) {
-                    var container = page.querySelector('#catalogueStatsContainer');
-                    var emptyMsg = page.querySelector('#catalogueStatsEmpty');
-                    if (!container) { return; }
-                    container.innerHTML = '';
-
-                    if (!peers || peers.length === 0) {
-                        emptyMsg.style.display = 'block';
+                function testAddPeer(page) {
+                    var url = page.querySelector('#addPeerUrl').value.trim();
+                    var token = page.querySelector('#addPeerToken').value.trim();
+                    var status = page.querySelector('#addPeerStatus');
+                    var testBtn = page.querySelector('#addPeerTestBtn');
+                    if (!url || !token) {
+                        status.style.color = '#e07070';
+                        status.textContent = 'URL and federation token are required to test.';
                         return;
                     }
-                    emptyMsg.style.display = 'none';
-
-                    peers.forEach(function (peer) {
-                        var row = document.createElement('div');
-                        row.style.cssText = 'display:flex;align-items:center;gap:1em;flex-wrap:wrap;border:1px solid #333;padding:.75em 1em;margin-bottom:.5em;border-radius:4px;';
-
-                        var info = document.createElement('div');
-                        info.style.flex = '1';
-                        info.innerHTML = '<strong>' + escHtml(peer.name || peer.Name || '') + '</strong>'
-                            + ' &nbsp;— '
-                            + (peer.movieCount || peer.MovieCount || 0) + ' movie(s), '
-                            + (peer.seriesCount || peer.SeriesCount || 0) + ' series';
-
-                        var btn = document.createElement('button');
-                        btn.type = 'button';
-                        btn.className = 'emby-button raised button-cancel';
-                        btn.innerHTML = '<span>Purge Catalog</span>';
-                        btn.addEventListener('click', function () {
-                            var pName = peer.name || peer.Name || '';
-                            if (!confirm('Delete all synced .strm files from peer "' + pName + '"?\nThis cannot be undone.')) {
-                                return;
-                            }
-                            var token = page.querySelector('#federationToken').value;
-                            btn.disabled = true;
-                            btn.querySelector('span').textContent = 'Purging…';
-                            fetch(jellyFedUrl('/JellyFed/peer/purge'), {
-                                method: 'POST',
-                                headers: {
-                                    'Content-Type': 'application/json',
-                                    'Authorization': 'Bearer ' + token
-                                },
-                                body: JSON.stringify({ peerName: pName })
-                            }).then(function (r) { return r.json(); }).then(function (result) {
-                                if (result && result.status === 'ok') {
-                                    info.innerHTML = '<strong>' + escHtml(pName) + '</strong>'
-                                        + ' — purged ' + result.deletedMovies + ' movie(s), '
-                                        + result.deletedSeries + ' series.';
-                                    btn.style.display = 'none';
-                                } else {
-                                    btn.disabled = false;
-                                    btn.querySelector('span').textContent = 'Purge Catalog';
-                                    alert('Purge failed.');
-                                }
-                            }).catch(function () {
-                                btn.disabled = false;
-                                btn.querySelector('span').textContent = 'Purge Catalog';
-                                alert('Purge error.');
-                            });
-                        });
-
-                        row.appendChild(info);
-                        row.appendChild(btn);
-                        container.appendChild(row);
-                    });
-                }
-
-                // ── Sync (FEAT-02) ────────────────────────────────────────────
-
-                function triggerSync(page, peerName) {
-                    var token = page.querySelector('#federationToken').value;
-                    if (!token) {
-                        alert('Federation token not set — cannot trigger sync.');
-                        return;
-                    }
-                    console.log('[JellyFed] triggerSync —', peerName ? '"' + peerName + '"' : 'all peers');
-                    var statusEl = page.querySelector('#syncStatus');
-                    statusEl.textContent = 'Queuing sync…';
-                    fetch(jellyFedUrl('/JellyFed/peer/sync'), {
+                    status.style.color = '#aaa';
+                    status.textContent = 'Testing ' + url + ' …';
+                    testBtn.disabled = true;
+                    testBtn.querySelector('span').textContent = 'Testing…';
+                    fetch(jellyFedUrl('/JellyFed/peers/test'), {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': 'Bearer ' + token
-                        },
-                        body: JSON.stringify({ peerName: peerName || null })
+                        headers: authHeaders(true),
+                        body: JSON.stringify({ Url: url, FederationToken: token })
                     }).then(function (r) {
-                        console.log('[JellyFed] triggerSync — HTTP ' + r.status);
-                        if (r.ok) {
-                            statusEl.textContent = peerName
-                                ? 'Sync queued for "' + peerName + '".'
-                                : 'Sync queued for all peers.';
-                        } else {
-                            statusEl.textContent = 'Error: HTTP ' + r.status;
-                        }
-                        setTimeout(function () { statusEl.textContent = ''; }, 4000);
+                        if (!r.ok) { return readErrorMessage(r).then(function (m) { throw new Error(m); }); }
+                        return r.json();
+                    }).then(function (result) {
+                        console.log('[JellyFed] test peer —', result);
+                        status.style.color = result.reachable ? '#7fcf7f' : '#e0a070';
+                        status.textContent = result.message || (result.reachable ? 'Reachable.' : 'Unreachable.');
                     }).catch(function (err) {
-                        console.error('[JellyFed] triggerSync — network error:', err);
-                        statusEl.textContent = 'Network error.';
-                        setTimeout(function () { statusEl.textContent = ''; }, 4000);
+                        console.error('[JellyFed] test peer — error:', err);
+                        status.style.color = '#e07070';
+                        status.textContent = 'Test error: ' + err.message;
+                    }).finally(function () {
+                        testBtn.disabled = false;
+                        testBtn.querySelector('span').textContent = 'Test connection';
                     });
                 }
 
-                // ── Config load / save ────────────────────────────────────────
+                function submitAddPeer(page) {
+                    var name = page.querySelector('#addPeerName').value.trim();
+                    var url = page.querySelector('#addPeerUrl').value.trim();
+                    var token = page.querySelector('#addPeerToken').value.trim();
+                    var status = page.querySelector('#addPeerStatus');
+                    var addBtn = page.querySelector('#addPeerConfirmBtn');
+                    if (!name || !url || !token) {
+                        status.style.color = '#e07070';
+                        status.textContent = 'All three fields are required.';
+                        return;
+                    }
+                    status.style.color = '#aaa';
+                    status.textContent = 'Adding peer…';
+                    addBtn.disabled = true;
+                    addBtn.querySelector('span').textContent = 'Adding…';
+                    fetch(jellyFedUrl('/JellyFed/peers'), {
+                        method: 'POST',
+                        headers: authHeaders(true),
+                        body: JSON.stringify({
+                            Name: name, Url: url, FederationToken: token,
+                            Enabled: true, SyncMovies: true, SyncSeries: true, SyncAnime: true
+                        })
+                    }).then(function (r) {
+                        if (!r.ok) { return readErrorMessage(r).then(function (m) { throw new Error(m); }); }
+                        return r.json();
+                    }).then(function (result) {
+                        console.log('[JellyFed] add peer —', result);
+                        status.style.color = result.reachable ? '#7fcf7f' : '#e0a070';
+                        status.textContent = result.reachable
+                            ? 'Peer added (reachable, v' + (result.version || '?') + ').'
+                            : 'Peer added — unreachable for now, will retry on sync.';
+                        // Refresh BOTH the cached `config` (so a later Settings "Save" doesn't wipe Peers)
+                        // AND the peers list immediately. Close modal after the refresh completes.
+                        loadSettings(page);
+                        loadPeerDetails(page);
+                        setTimeout(function () { closeAddPeer(page); }, 1200);
+                    }).catch(function (err) {
+                        console.error('[JellyFed] add peer — error:', err);
+                        status.style.color = '#e07070';
+                        status.textContent = 'Error: ' + err.message;
+                    }).finally(function () {
+                        addBtn.disabled = false;
+                        addBtn.querySelector('span').textContent = 'Add';
+                    });
+                }
 
-                function loadConfig(page) {
-                    console.log('[JellyFed] loadConfig — fetching plugin configuration...');
+                // ── Settings load / save ──────────────────────────────────────
+                function loadSettings(page) {
                     ApiClient.getPluginConfiguration(pluginId).then(function (loaded) {
                         config = loaded;
                         page.querySelector('#federationToken').value = loaded.FederationToken || loaded.federationToken || '';
                         page.querySelector('#syncIntervalHours').value = loaded.SyncIntervalHours || loaded.syncIntervalHours || 6;
                         page.querySelector('#libraryPath').value = loaded.LibraryPath || loaded.libraryPath || '';
+                        page.querySelector('#moviesRootPath').value = loaded.MoviesRootPath || loaded.moviesRootPath || '';
+                        page.querySelector('#seriesRootPath').value = loaded.SeriesRootPath || loaded.seriesRootPath || '';
+                        page.querySelector('#animeRootPath').value = loaded.AnimeRootPath || loaded.animeRootPath || '';
                         page.querySelector('#jellyfinApiKey').value = loaded.JellyfinApiKey || loaded.jellyfinApiKey || '';
                         page.querySelector('#selfName').value = loaded.SelfName || loaded.selfName || '';
                         page.querySelector('#selfUrl').value = loaded.SelfUrl || loaded.selfUrl || '';
-
-                        var peers = loaded.Peers || loaded.peers || [];
-                        console.log('[JellyFed] loadConfig — ' + peers.length + ' peer(s) loaded:', peers.map(function(p) {
-                            return { name: p.Name || p.name, url: p.Url || p.url, enabled: p.Enabled || p.enabled };
-                        }));
-                        renderPeers(page, peers);
-
-                        var blocked = loaded.BlockedPeerUrls || loaded.blockedPeerUrls || [];
-                        console.log('[JellyFed] loadConfig — ' + blocked.length + ' blocked URL(s):', blocked);
-                        renderBlockedPeers(page, blocked);
-
-                        loadManifestStats(page);
-                    }).catch(function(err) {
-                        console.error('[JellyFed] loadConfig — failed:', err);
+                        // Once the token is known, peers tab (if active) can refresh.
+                        if (page.querySelector('.jf-tab-panel[data-panel="peers"]').classList.contains('active')) {
+                            loadPeerDetails(page);
+                        }
                     });
                 }
 
-                function saveConfig(page, e) {
+                function saveSettings(page, e) {
                     e.preventDefault();
                     Dashboard.showLoadingMsg();
-
-                    // Nouvelles URLs bloquées (peers supprimés dans cette session)
-                    var newBlocked = collectBlockedUrls(page);
-                    // URLs toujours bloquées (affichées dans la section Blocked Peers, non débloquées)
-                    var stillBlocked = collectCurrentBlockedUrls(page);
-                    // Union des deux, sans doublon
-                    var allBlocked = stillBlocked.concat(newBlocked).filter(function (u, i, a) {
-                        return u && a.indexOf(u) === i;
+                    // Re-fetch the latest server config just before saving, then merge the
+                    // form fields on top. This avoids wiping Peers / BlockedPeerUrls that were
+                    // updated via the dedicated peer endpoints while this page was open.
+                    ApiClient.getPluginConfiguration(pluginId).then(function (fresh) {
+                        var payload = Object.assign({}, fresh, {
+                            FederationToken: page.querySelector('#federationToken').value,
+                            SyncIntervalHours: parseInt(page.querySelector('#syncIntervalHours').value, 10) || 6,
+                            LibraryPath: page.querySelector('#libraryPath').value,
+                            MoviesRootPath: page.querySelector('#moviesRootPath').value,
+                            SeriesRootPath: page.querySelector('#seriesRootPath').value,
+                            AnimeRootPath: page.querySelector('#animeRootPath').value,
+                            JellyfinApiKey: page.querySelector('#jellyfinApiKey').value,
+                            SelfName: page.querySelector('#selfName').value,
+                            SelfUrl: page.querySelector('#selfUrl').value
+                        });
+                        return ApiClient.updatePluginConfiguration(pluginId, payload).then(function () {
+                            Dashboard.processPluginConfigurationUpdateResult();
+                            config = payload;
+                        });
+                    }).catch(function (err) {
+                        console.error('[JellyFed] saveSettings — failed:', err);
                     });
-
-                    var payload = {
-                        // FederationToken is auto-generated — pass the current value as-is
-                        // so it is preserved; the user cannot change it from the UI.
-                        FederationToken: page.querySelector('#federationToken').value,
-                        SyncIntervalHours: parseInt(page.querySelector('#syncIntervalHours').value, 10) || 6,
-                        LibraryPath: page.querySelector('#libraryPath').value,
-                        JellyfinApiKey: page.querySelector('#jellyfinApiKey').value,
-                        SelfName: page.querySelector('#selfName').value,
-                        SelfUrl: page.querySelector('#selfUrl').value,
-                        Peers: collectPeers(page),
-                        BlockedPeerUrls: allBlocked
-                    };
-
-                    console.log('[JellyFed] saveConfig — saving ' + payload.Peers.length + ' peer(s):', payload.Peers.map(function(p) {
-                        return { name: p.Name, url: p.Url, enabled: p.Enabled };
-                    }));
-                    console.log('[JellyFed] saveConfig — blocked URLs:', payload.BlockedPeerUrls);
-
-                    ApiClient.updatePluginConfiguration(pluginId, payload).then(function () {
-                        console.log('[JellyFed] saveConfig — OK');
-                        Dashboard.processPluginConfigurationUpdateResult();
-                    }).catch(function(err) {
-                        console.error('[JellyFed] saveConfig — failed:', err);
-                    });
-                }
-
-                // ── Helpers ───────────────────────────────────────────────────
-
-                function escHtml(str) {
-                    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
                 }
 
                 // ── Wiring ────────────────────────────────────────────────────
-
                 var page = document.querySelector('#JellyFedConfigPage');
 
-                page.addEventListener('pageshow', function () { loadConfig(page); });
-                page.addEventListener('viewshow', function () { loadConfig(page); });
-                setTimeout(function () { loadConfig(page); }, 0);
-
-                page.querySelector('#JellyFedConfigForm').addEventListener('submit', function (e) {
-                    saveConfig(page, e);
+                page.querySelectorAll('.jf-tab').forEach(function (btn) {
+                    btn.addEventListener('click', function () {
+                        activateTab(page, btn.getAttribute('data-tab'));
+                    });
                 });
 
-                page.querySelector('#addPeerBtn').addEventListener('click', function () {
-                    var current = collectPeers(page);
-                    console.log('[JellyFed] addPeer — adding empty peer (total will be ' + (current.length + 1) + ')');
-                    renderPeers(page, current.concat([{}]));
+                page.addEventListener('pageshow', function () { loadSettings(page); });
+                page.addEventListener('viewshow', function () { loadSettings(page); });
+                setTimeout(function () { loadSettings(page); }, 0);
+
+                page.querySelector('#JellyFedConfigForm').addEventListener('submit', function (e) {
+                    saveSettings(page, e);
+                });
+
+                page.querySelector('#refreshPeersBtn').addEventListener('click', function () {
+                    loadPeerDetails(page);
                 });
 
                 page.querySelector('#syncAllBtn').addEventListener('click', function () {
-                    triggerSync(page, null);
+                    var btn = page.querySelector('#syncAllBtn');
+                    btn.disabled = true;
+                    btn.querySelector('span').textContent = 'Queuing…';
+                    fetch(jellyFedUrl('/JellyFed/peer/sync'), {
+                        method: 'POST',
+                        headers: authHeaders(true),
+                        body: JSON.stringify({ peerName: null })
+                    }).then(function (r) {
+                        if (!r.ok) { throw new Error('HTTP ' + r.status); }
+                    }).then(function () {
+                        btn.querySelector('span').textContent = 'Queued ✓';
+                        setTimeout(function () {
+                            btn.querySelector('span').textContent = 'Sync all';
+                            btn.disabled = false;
+                            loadPeerDetails(page);
+                        }, 1500);
+                    }).catch(function (err) {
+                        console.error('[JellyFed] sync all error:', err);
+                        alert('Sync error: ' + err.message);
+                        btn.querySelector('span').textContent = 'Sync all';
+                        btn.disabled = false;
+                    });
                 });
 
+                page.querySelector('#openAddPeerBtn').addEventListener('click', function () { openAddPeer(page); });
+                page.querySelector('#addPeerCancelBtn').addEventListener('click', function () { closeAddPeer(page); });
+                page.querySelector('#addPeerTestBtn').addEventListener('click', function () { testAddPeer(page); });
+                page.querySelector('#addPeerConfirmBtn').addEventListener('click', function () { submitAddPeer(page); });
+                page.querySelector('#addPeerModal').addEventListener('click', function (e) {
+                    if (e.target.id === 'addPeerModal') { closeAddPeer(page); }
+                });
+
+                page.querySelector('#saveBlockedBtn').addEventListener('click', function () { saveBlocked(page); });
+
                 page.querySelector('#copyTokenBtn').addEventListener('click', function () {
-                    var token = page.querySelector('#federationToken').value;
+                    var token = getToken();
                     if (!token) { return; }
                     var btn = page.querySelector('#copyTokenBtn span');
+                    var restore = function () { setTimeout(function () { btn.textContent = 'Copy'; }, 2000); };
                     if (navigator.clipboard) {
                         navigator.clipboard.writeText(token).then(function () {
                             btn.textContent = 'Copied!';
-                            setTimeout(function () { btn.textContent = 'Copy'; }, 2000);
+                            restore();
                         });
                     } else {
-                        // Fallback for non-HTTPS or older browsers
                         var tmp = document.createElement('input');
                         tmp.value = token;
                         document.body.appendChild(tmp);
@@ -576,7 +945,7 @@
                         document.execCommand('copy');
                         document.body.removeChild(tmp);
                         btn.textContent = 'Copied!';
-                        setTimeout(function () { btn.textContent = 'Copy'; }, 2000);
+                        restore();
                     }
                 });
 
@@ -587,37 +956,30 @@
                         'Are you sure?')) {
                         return;
                     }
-                    var token = page.querySelector('#federationToken').value;
                     var btn = page.querySelector('#resetNetworkBtn');
                     btn.disabled = true;
                     btn.querySelector('span').textContent = 'Resetting…';
-                    console.log('[JellyFed] resetNetwork — sending request...');
 
                     fetch(jellyFedUrl('/JellyFed/network/reset'), {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': 'Bearer ' + token
-                        },
+                        headers: authHeaders(true),
                         body: JSON.stringify({})
                     }).then(function (r) {
-                        return r.ok ? r.json() : Promise.reject('HTTP ' + r.status);
+                        if (!r.ok) { throw new Error('HTTP ' + r.status); }
+                        return r.json();
                     }).then(function (result) {
                         if (result && result.status === 'ok') {
-                            console.log('[JellyFed] resetNetwork — OK, new token:', result.newToken);
                             page.querySelector('#federationToken').value = result.newToken;
-                            renderPeers(page, []);
-                            renderBlockedPeers(page, []);
-                            renderCatalogueStats(page, []);
-                            alert('Network reset complete. Your new federation token is now active.');
+                            alert('Network reset complete. Your new federation token is active.');
+                            loadSettings(page);
+                            loadPeerDetails(page);
                         } else {
                             alert('Reset failed.');
                         }
-                        btn.disabled = false;
-                        btn.querySelector('span').textContent = 'Reset Network';
                     }).catch(function (err) {
                         console.error('[JellyFed] resetNetwork — error:', err);
-                        alert('Reset error: ' + err);
+                        alert('Reset error: ' + err.message);
+                    }).finally(function () {
                         btn.disabled = false;
                         btn.querySelector('span').textContent = 'Reset Network';
                     });
