@@ -33,21 +33,36 @@ public class StrmWriter
     }
 
     /// <summary>
+    /// Sanitizes a peer name for use as a single filesystem directory segment (per-peer folder).
+    /// </summary>
+    /// <param name="peerName">Peer display name.</param>
+    /// <returns>Safe folder name.</returns>
+    public static string SanitizePeerFolderSegment(string peerName)
+    {
+        if (string.IsNullOrWhiteSpace(peerName))
+        {
+            return "_peer";
+        }
+
+        return SanitizeName(peerName.Trim());
+    }
+
+    /// <summary>
     /// Writes a movie item: folder, .strm, .nfo, poster and backdrop.
     /// </summary>
-    /// <param name="libraryPath">Root library path.</param>
+    /// <param name="contentRoot">Directory for this peer's movies (e.g. {MoviesRoot}/{peer}/).</param>
     /// <param name="item">The catalog item.</param>
     /// <param name="peer">The source peer.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The folder path that was written.</returns>
     public async Task<string> WriteMovieAsync(
-        string libraryPath,
+        string contentRoot,
         CatalogItemDto item,
         PeerConfiguration peer,
         CancellationToken cancellationToken)
     {
         var folderName = SanitizeName($"{item.Title} ({item.Year})");
-        var folderPath = Path.Combine(libraryPath, "Films", folderName);
+        var folderPath = Path.Combine(contentRoot, folderName);
         Directory.CreateDirectory(folderPath);
 
         var strmPath = Path.Combine(folderPath, $"{folderName}.strm");
@@ -70,21 +85,21 @@ public class StrmWriter
     /// <summary>
     /// Writes a series item: folder, tvshow.nfo, poster and all seasons/episodes.
     /// </summary>
-    /// <param name="libraryPath">Root library path.</param>
+    /// <param name="contentRoot">Directory for this peer's series (e.g. {SeriesRoot}/{peer}/ or anime equivalent).</param>
     /// <param name="item">The series catalog item.</param>
     /// <param name="seasons">The seasons and episodes.</param>
     /// <param name="peer">The source peer.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The folder path that was written.</returns>
     public async Task<string> WriteSeriesAsync(
-        string libraryPath,
+        string contentRoot,
         CatalogItemDto item,
         SeasonsResponseDto seasons,
         PeerConfiguration peer,
         CancellationToken cancellationToken)
     {
         var folderName = SanitizeName($"{item.Title} ({item.Year})");
-        var folderPath = Path.Combine(libraryPath, "Series", folderName);
+        var folderPath = Path.Combine(contentRoot, folderName);
         Directory.CreateDirectory(folderPath);
 
         var nfoPath = Path.Combine(folderPath, "tvshow.nfo");

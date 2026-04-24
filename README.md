@@ -41,12 +41,14 @@ Instance A installe JellyFed. Elle se connecte à l'Instance B. Le plugin synchr
 - Rescan Jellyfin déclenché après chaque sync
 
 ### Gestion des peers
-- Configuration via le panneau admin Jellyfin
-- Statut online/offline via heartbeat toutes les 5 minutes
-- Auto-registration bidirectionnelle (A configure B → B découvre A automatiquement)
-- Tokens d'accès par peer — révocation immédiate à la suppression
-- Blacklist des peers supprimés manuellement
-- Sync manuelle par peer ou globale
+- Onglet dédié « Peers » dans la page de configuration (Readme / Settings / Peers / Danger Zone)
+- Cartes par peer avec statut online/offline, version, dernière sync (badge ok/failed/never + erreur), durée
+- Compteurs synced par peer : catalogue distant (films / séries) vs local (films / séries / anime) + disque utilisé
+- Toggles par peer : Enabled, Films, Séries, Anime (PATCH live sans bouton Save)
+- Actions fine-grained : Resync ce peer, Purge .strm, Edit (nom / URL / token, avec renommage des dossiers), Remove (purge + révocation token + blacklist)
+- Ajout de peer via modal avec health-check préalable
+- Auto-registration bidirectionnelle + heartbeat toutes les 5 minutes
+- Blacklist automatique des peers supprimés (dépose les URLs dans Blocked Peers)
 
 ### Sécurité
 - Token de fédération auto-généré au démarrage (non éditable)
@@ -55,10 +57,10 @@ Instance A installe JellyFed. Elle se connecte à l'Instance B. Le plugin synchr
 - `X-Forwarded-Proto` respecté derrière un reverse proxy
 
 ### UI admin
-- Peers avec statut, Sync Now par peer, stats catalogue (films/séries par peer)
-- Purge catalogue par peer, Blocked Peers avec déblocage
+- Page avec 4 onglets : **Readme** (intro + setup, ouvert par défaut), **Settings** (globaux), **Peers** (liste + actions), **Danger Zone** (reset network)
 - Token de fédération en lecture seule avec bouton Copy
-- Danger Zone : Reset Network
+- Blocked Peers déplacés dans l'onglet Peers (unblock + save)
+- Reset Network isolé dans son propre onglet pour éviter les clics accidentels
 
 ---
 
@@ -101,9 +103,12 @@ Ajouter un peer (URL + token du peer distant) et cliquer Save.
 
 ### Bibliothèques Jellyfin
 
-Après la première sync :
-- Ajouter `{LibraryPath}/Films` → type **Films**
-- Ajouter `{LibraryPath}/Series` → type **Séries**
+Après la première sync, ajoutez des bibliothèques Jellyfin qui pointent vers les **racines** configurées (ou les défauts sous le dossier métadonnées) :
+- **Films** : dossier `Movies root` (défaut `{LibraryPath}/Films`) — type **Films**
+- **Séries** : dossier `TV series root` (défaut `{LibraryPath}/Series`) — type **Séries**
+- **Animes** (optionnel) : dossier `Anime root` (défaut `{LibraryPath}/Animes`) — type **Films** ou **Séries** selon ce que tu y synchronises
+
+Les `.strm` sont rangés par **peer** : `{Racine}/{NomDuPeer}/…`.
 
 ### JellyfinApiKey (optionnel)
 

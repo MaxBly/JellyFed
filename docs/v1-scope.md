@@ -19,7 +19,7 @@ Tout ce qui suit constitue l'interface stable du plugin. Une fois v1 publiée, c
 
 | Contrat | Support | Impact d'un changement post-v1 |
 |---|---|---|
-| Layout bibliothèque | `{LibraryPath}/...` sur disque | Reset total côté peers + rescan Jellyfin |
+| Layout bibliothèque | `{MoviesRoot|SeriesRoot|AnimeRoot}/{PeerName}/...` sur disque | Migration disque + rescan Jellyfin |
 | Format `.strm` | Fichier texte, URL + token | Resync complet de tous les peers |
 | Format `.nfo` | XML, `<fileinfo><streamdetails>` | Rescan Jellyfin (perte métadonnées en attendant) |
 | Schema `.jellyfed-manifest.json` | JSON local au plugin | Perte de l'historique, pruning cassé |
@@ -61,16 +61,24 @@ Le `PeerClient` négocie la version lors du premier contact (champ `ProtocolVers
 
 **Contrat posé :** les chemins HTTP `/JellyFed/v1/*` sont stables pour la durée de vie de v1.x. Les breaking changes vont dans `/v2/`.
 
-### 3. Layout bibliothèque — choix unified vs per-peer (v0.1.0.17)
+### 3. Layout bibliothèque per-peer — déjà implémenté, à figer proprement (v0.1.0.17)
 
-Introduire une option `LibraryLayout` dans la config plugin :
+La branche `temp`, réconciliée sur `main`, a déjà fait le vrai choix d'architecture :
 
-- **unified** (défaut) : `{LibraryPath}/Films/{Movie}/` et `{LibraryPath}/Series/{Show}/` — comportement actuel, déduplication par TMDB ID.
-- **per-peer** : `{LibraryPath}/{PeerName}/Films/{Movie}/` — une bibliothèque Jellyfin par peer, même contenu possible en doublon entre peers.
+- layout **par peer** ;
+- trois racines configurables : `MoviesRootPath`, `SeriesRootPath`, `AnimeRootPath` ;
+- sous-arbre dédié par peer : `{Root}/{PeerName}/...` ;
+- `SyncAnime` géré séparément du couple films / séries.
 
-Pourquoi avant v1 : changer le layout après v1 forcerait tous les utilisateurs en mode unified à migrer, et l'outillage de migration entre layouts est non-trivial (déplacement des `.strm`, mise à jour du manifest avec les nouveaux paths, re-scan Jellyfin). Autant proposer les deux modes dès le départ et laisser le choix figé.
+Le sujet n'est donc plus « faut-il unified ou per-peer ? », mais :
 
-**Contrat posé :** `LibraryLayout` est immuable après la première sync. Un switch manuel = reset network.
+1. **figer** ce layout comme contrat v1 ;
+2. écrire la **migration** depuis les anciennes installations qui rangeaient plus à plat sous `{LibraryPath}` ;
+3. documenter qu'un renommage de peer ou de racine implique une réécriture/migration encadrée, pas un changement libre post-v1.
+
+Pourquoi avant v1 : le layout sur disque est déjà visible par l'utilisateur et piloté par la config. Sans migration/versioning explicite, l'upgrade depuis les builds antérieurs restera fragile.
+
+**Contrat posé :** le layout v1 est per-peer. Les futures évolutions doivent être rétrocompatibles ou accompagnées d'une migration versionnée.
 
 ### 4. Multi-source / `IMediaSourceProvider` (v0.1.0.18)
 
@@ -106,12 +114,13 @@ Pourquoi avant v1 : c'est un bug fonctionnel majeur pour tout utilisateur avec d
 ## Plan de versions
 
 ```
-v0.1.0.15  Versioning config + manifest (schemaVersion, SchemaMigrator)
-v0.1.0.16  Versioning API (/JellyFed/v1/ + alias transitoires)
-v0.1.0.17  Layout per-peer (option LibraryLayout, immuable après 1re sync)
-v0.1.0.18  Multi-source (sources.json + IMediaSourceProvider)
-v0.1.0.19  Tag <studio>JellyFed:peer</studio> + fix SRT soft-sub
-v0.1.0.20  Tests d'intégration + hardening (migrations, edge cases)
+v0.1.0.15  Release de réconciliation temp -> main (UI peers + layout per-peer + anime roots)
+v0.1.0.16  Versioning config + manifest (schemaVersion, SchemaMigrator)
+v0.1.0.17  Versioning API (/JellyFed/v1/ + alias transitoires)
+v0.1.0.18  Migration legacy layout -> layout per-peer figé
+v0.1.0.19  Multi-source (sources.json + IMediaSourceProvider)
+v0.1.0.20  Tag <studio>JellyFed:peer</studio> + fix SRT soft-sub
+v0.1.0.21  Tests d'intégration + hardening (migrations, edge cases)
 v1.0.0     Release stable — architecture figée
 ```
 

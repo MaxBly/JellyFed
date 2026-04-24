@@ -7,23 +7,23 @@
     "overview": "Native federation between Jellyfin instances",
     "owner": "MaxBly",
     "targetAbi": "10.9.0.0",
-    "timestamp": "2026-04-22T22:53:30.0000000Z",
+    "timestamp": "2026-04-24T17:08:52.0000000Z",
     "versions": [
       {
-        "version": "0.1.0.14",
-        "changelog": "Release 0.1.0.14.",
+        "version": "0.1.0.15",
+        "changelog": "[Main release] Reconcile temp branch onto main: advanced peers UI, per-peer roots (movies/series/anime), peer-level sync/admin flows, and updated docs.",
         "targetAbi": "10.11.0.0",
-        "sourceUrl": "https://jellyfed.bly-net.com/repo/jellyfed_0.1.0.14.zip",
-        "checksum": "f6ae885a0e6584fa8c9e1b4d1ddb3f2c",
-        "timestamp": "2026-04-22T22:53:30.0000000Z"
+        "sourceUrl": "https://jellyfed.bly-net.com/repo/jellyfed_0.1.0.15.zip",
+        "checksum": "30f52703296cac2231f5be0371338ec4",
+        "timestamp": "2026-04-24T17:08:52.0000000Z"
       },
       {
-        "version": "0.1.0.0",
-        "changelog": "Release 0.1.0.0.",
-        "targetAbi": "10.9.0.0",
-        "sourceUrl": "https://jellyfed.bly-net.com/repo/jellyfed_0.1.0.0.zip",
-        "checksum": "8b1beba8402dba0d325ce7d52a91d6b6",
-        "timestamp": "2026-04-14T21:17:20.0000000Z"
+        "version": "0.1.0.14",
+        "changelog": "[Main release] Release 0.1.0.14.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://jellyfed.bly-net.com/repo/jellyfed_0.1.0.14.zip",
+        "checksum": "24910e446a5aacec70785ffaf770268c",
+        "timestamp": "2026-04-23T06:55:53.0000000Z"
       }
     ]
   }

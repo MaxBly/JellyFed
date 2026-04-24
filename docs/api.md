@@ -228,6 +228,111 @@ Supprime tous les `.strm` d'un peer du manifest et du filesystem.
 
 ---
 
+### `GET /JellyFed/peers/details`
+
+Vue riche utilisée par l'onglet **Peers** de la page admin : agrège configuration, heartbeat, dernière sync et compteurs locaux (films / séries / anime + taille disque) calculés depuis le manifest et le filesystem.
+
+**Réponse 200 :**
+```json
+{
+  "peers": [
+    {
+      "name": "instance-b",
+      "url": "https://peer-b.example.com",
+      "enabled": true, "syncMovies": true, "syncSeries": true, "syncAnime": true,
+      "hasAccessToken": true,
+      "online": true, "lastSeen": "2026-04-15T20:00:00Z", "version": "0.1.0",
+      "lastSyncAt": "2026-04-15T19:45:00Z", "lastSyncStatus": "ok",
+      "lastSyncError": null, "lastSyncDurationMs": 12450,
+      "peerMovieCount": 120, "peerSeriesCount": 40,
+      "localMovieCount": 118, "localSeriesCount": 38, "localAnimeCount": 12,
+      "localDiskBytes": 251658240,
+      "moviesFolder": "/data/.../Films/instance-b",
+      "seriesFolder": "/data/.../Series/instance-b",
+      "animeFolder": "/data/.../Animes/instance-b"
+    }
+  ],
+  "lastGlobalSyncAt": "2026-04-15T19:45:00Z"
+}
+```
+
+---
+
+### `POST /JellyFed/peers`
+
+Ajoute un peer depuis la modal *Add peer* du panneau admin. Fait un health-check `/JellyFed/health` sur l'URL fournie avant de persister ; le peer est stocké même si unreachable (admin peut configurer en avance). L'URL est retirée automatiquement de `BlockedPeerUrls`.
+
+**Body :** `AddPeerRequestDto` — `Name`, `Url`, `FederationToken`, `Enabled`, `SyncMovies`, `SyncSeries`, `SyncAnime`.
+
+**Réponse 200 :** `{ "status": "ok", "reachable": true, "version": "0.1.0" }` — `reachable=false` si le health check a échoué.
+
+**Conflits :** `409 Conflict` si un peer utilise déjà ce nom ou cette URL.
+
+---
+
+### `POST /JellyFed/peers/test`
+
+Teste la joignabilité d'un peer candidat **sans rien modifier** à la configuration. Utilisé par le bouton *Test connection* de la modal *Add peer* pour valider URL + token avant de confirmer l'ajout.
+
+**Body :** `AddPeerRequestDto` — seuls `Url` et `FederationToken` sont requis (les autres champs sont ignorés).
+
+**Réponse 200 :**
+```json
+{
+  "status": "ok",          // "ok" si reachable, "unreachable" sinon
+  "reachable": true,
+  "version": "0.1.0",      // version JellyFed rapportée, null si injoignable
+  "message": "Peer reachable (JellyFed v0.1.0)."
+}
+```
+
+**400 Bad Request :** `Url` ou `FederationToken` manquant.
+
+---
+
+### `POST /JellyFed/peer/{name}/sync`
+
+Sync inline pour un seul peer. Exécute `FederationSyncTask.SyncPeerAsync(peer, ct)` — même pipeline que la tâche planifiée, scoped à ce peer (pruning limité à ses entrées manifest).
+
+**Réponse 200 :** `PeerSyncResultDto` — `addedMovies`, `addedSeries`, `skippedMovies`, `skippedSeries`, `pruned`, `durationMs`, `error?`.
+
+**404 :** le peer n'existe pas.
+
+---
+
+### `POST /JellyFed/peer/{name}/purge`
+
+Équivalent de `/peer/purge` en REST path-based. Supprime `.strm` + entrées manifest + dossiers per-peer, reset les compteurs `PeerStatus` (status → `never`). La config du peer est conservée.
+
+**Réponse 200 :** `{ "status": "ok", "deletedMovies": N, "deletedSeries": N }`
+
+---
+
+### `POST /JellyFed/peer/{name}/remove`
+
+Retire définitivement un peer : purge des `.strm`, révocation de `AccessToken` (les prochaines requêtes du peer retournent 401), ajout de son URL dans `BlockedPeerUrls` pour bloquer l'auto-registration, et retrait de `config.Peers`.
+
+**Réponse 200 :** `{ "status": "ok", "deletedMovies": N, "deletedSeries": N, "blockedUrl": "..." }`
+
+---
+
+### `PATCH /JellyFed/peer/{name}`
+
+Update partiel d'un peer depuis l'UI. Seuls les champs non-null sont appliqués.
+
+**Body :** `UpdatePeerRequestDto` — `Name?`, `Url?`, `FederationToken?`, `Enabled?`, `SyncMovies?`, `SyncSeries?`, `SyncAnime?`.
+
+**Cas particulier `Name` :**
+1. Validation d'unicité (nom + URL) — `409` en cas de conflit.
+2. Calcul des segments sanitizés via `StrmWriter.SanitizePeerFolderSegment`.
+3. `Directory.Move` pour chaque racine (Movies / Series / Anime) si `{Root}/{oldSeg}` existe.
+4. Réécriture du manifest : `PeerName` + préfixe `Path` pour toutes les entrées du peer.
+5. Renommage de la clé dans `.jellyfed-peers.json`.
+
+**Réponse 200 :** `{ "status": "ok" }`
+
+---
+
 ### `POST /JellyFed/network/reset`
 
 Reset total : nouveau token de fédération, suppression de tous les peers et `.strm`.

@@ -1,7 +1,7 @@
 ---
 name: "JellyFed"
 guid: "ff0164d7-e8c0-44c1-bc61-45017125a155"
-version: "0.1.0.14"
+version: "0.1.0.15"
 targetAbi: "10.11.0.0"
 framework: "net9.0"
 overview: "Native federation between Jellyfin instances"
@@ -14,4 +14,5 @@ owner: "MaxBly"
 artifacts:
 - "Jellyfin.Plugin.JellyFed.dll"
 changelog: >
-  Initial release.
+  Reconcile temp branch onto main: advanced peers UI, per-peer roots (movies/series/anime),
+  peer-level sync/admin flows, and updated docs.
