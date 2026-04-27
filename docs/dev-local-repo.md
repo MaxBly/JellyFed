@@ -7,6 +7,7 @@ Ce guide explique comment **servir le dossier `repo/` sur votre LAN** (fichiers 
 - Après `./scripts/build-repo.sh`, vous avez un ZIP du plugin et un `repo/manifest.json` dont les `sourceUrl` pointent vers le dépôt public (`jellyfed.bly-net.com`).
 - Pour tester l’installation du plugin depuis **une autre machine Jellyfin sur le même réseau**, il faut un manifeste dont les `sourceUrl` pointent vers **votre machine** (HTTP sur le LAN).
 - Le script `scripts/generate-manifest-local.py` produit **`repo/manifest.local.json`** (fichier non versionné) : mêmes entrées que `manifest.json`, mais avec des `sourceUrl` locales et des **libellés « dev »** dans le catalogue Jellyfin.
+- En plus, il essaie maintenant de **garder explicitement la dernière version de `main`** dans `manifest.local.json`, juste derrière l’entrée dev locale, pour pouvoir comparer / revenir rapidement à la release officielle. La priorité est : `upstream/main` → `origin/main` → `main` local → manifeste public en fallback.
 - **Nginx dans Docker** expose le dossier `repo/` en lecture seule sur un port (par défaut **8765**).
 
 ## Quelle version est servie en local ?
@@ -16,12 +17,14 @@ Le **fichier ZIP** servi est toujours celui produit par **`./scripts/build-repo.
 Dans **`manifest.local.json`**, pour le catalogue Jellyfin :
 
 - La **première entrée** de `versions` (la plus récente) a son champ **`version`** forcé à **`<major>.<minor>.<patch>.<stamp>`**, où `major.minor.patch` vient de `build.yaml`.
+- La **deuxième entrée** est réservée à la **dernière version `main` connue** (depuis les refs git locales si disponibles, sinon depuis le manifeste public).
 - `<stamp>` suit **l’état réel du dossier source** :
   - **repo clean** → timestamp Unix du commit `HEAD`
   - **repo dirty** → timestamp courant (strictement plus récent que `HEAD`)
 - Résultat : la version exposée par le manifest local suit toujours le code actuellement présent dans `jellyfed/`, et chaque build local plus récent reste vu comme une upgrade par Jellyfin.
 - Un **lien symbolique** `repo/jellyfed_<major>.<minor>.<patch>.<stamp>.zip` → le ZIP réel du build (ex. `jellyfed_0.1.0.15.zip`) est créé à chaque `make dev`. Les alias précédents sont purgés automatiquement pour ne pas encombrer `repo/`.
 - Les entrées plus anciennes du tableau `versions`, si présentes, **conservent** leurs numéros d’origine.
+- Si le ZIP de la dernière release `main` est déjà présent dans `repo/`, l’entrée `main` du manifest local pointe aussi vers le LAN ; sinon elle garde simplement son `sourceUrl` public d’origine.
 - **`overview`** : préfixe `[Dépôt LAN · dev]`
 - **`changelog`** de l’entrée **la plus récente** : texte du type  
   `[Dev local] ... JellyFed <major>.<minor>.<patch>.<stamp> — binaire issu du ZIP jellyfed_<x.y.z>.zip (source: git <sha> (clean|dirty); build-repo.sh / build.yaml).`

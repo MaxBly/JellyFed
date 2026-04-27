@@ -23,11 +23,14 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from urllib.error import URLError
 from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
 _DEV_OVERVIEW_PREFIX = "[Dépôt LAN · dev] "
 _DEV_CHANGELOG_PREFIX = "[Dev local] "
 _MAIN_CHANGELOG_PREFIX = "[Main release] "
+_DEFAULT_MAIN_MANIFEST_URL = "https://jellyfed.bly-net.com/repo/manifest.json"
 # Base du schéma dev local, dérivée de build.yaml.
 # Le dernier composant encode l'état courant du code source.
 # - repo clean: timestamp Unix du commit HEAD
@@ -122,6 +125,92 @@ def _apply_dev_labels(plugin: dict, versions: list) -> None:
             v["changelog"] = f"{_MAIN_CHANGELOG_PREFIX}{base}" if base else _MAIN_CHANGELOG_PREFIX.strip()
 
 
+def _fetch_latest_main_version(manifest_url: str, plugin_guid: str) -> dict | None:
+    try:
+        req = Request(manifest_url, headers={"User-Agent": "JellyFed dev-manifest generator"})
+        with urlopen(req, timeout=10) as resp:
+            payload = json.load(resp)
+    except (OSError, URLError, TimeoutError, json.JSONDecodeError):
+        return None
+
+    if not isinstance(payload, list):
+        return None
+
+    for plugin in payload:
+        if not isinstance(plugin, dict):
+            continue
+        if plugin.get("guid") != plugin_guid:
+            continue
+        versions = plugin.get("versions")
+        if isinstance(versions, list):
+            for version in versions:
+                if isinstance(version, dict) and version.get("version"):
+                    return dict(version)
+    return None
+
+
+def _load_latest_main_version_from_git(root: Path, plugin_guid: str, ref: str) -> dict | None:
+    try:
+        proc = subprocess.run(
+            ['git', 'show', f'{ref}:repo/manifest.json'],
+            cwd=root,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        payload = json.loads(proc.stdout)
+    except (OSError, subprocess.CalledProcessError, json.JSONDecodeError):
+        return None
+
+    if not isinstance(payload, list):
+        return None
+
+    for plugin in payload:
+        if not isinstance(plugin, dict):
+            continue
+        if plugin.get('guid') != plugin_guid:
+            continue
+        versions = plugin.get('versions')
+        if isinstance(versions, list):
+            for version in versions:
+                if isinstance(version, dict) and version.get('version'):
+                    return dict(version)
+    return None
+
+
+def _resolve_latest_main_version(root: Path, plugin_guid: str, manifest_url: str) -> dict | None:
+    for ref in ('upstream/main', 'origin/main', 'main'):
+        version = _load_latest_main_version_from_git(root, plugin_guid, ref)
+        if version is not None:
+            return version
+    return _fetch_latest_main_version(manifest_url, plugin_guid)
+
+
+def _prefer_local_source_url(version_entry: dict, base_url: str, repo_dir: Path) -> dict:
+    out = dict(version_entry)
+    url = out.get("sourceUrl")
+    if not isinstance(url, str) or not url:
+        return out
+    parsed = urlparse(url)
+    name = parsed.path.rsplit("/", 1)[-1] if parsed.path else ""
+    if name.endswith(".zip") and (repo_dir / name).is_file():
+        out["sourceUrl"] = f"{base_url}/{name}"
+    return out
+
+
+def _upsert_after_latest_dev(versions: list, version_entry: dict) -> list:
+    version = version_entry.get("version")
+    if not version:
+        return versions
+    head = versions[:1]
+    tail = [v for v in versions[1:] if not (isinstance(v, dict) and v.get("version") == version)]
+    filtered = head + tail
+    insert_at = 1 if head else 0
+    filtered.insert(insert_at, version_entry)
+    return filtered
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Écrit repo/manifest.local.json avec des sourceUrl pointant vers une base HTTP locale."
@@ -136,6 +225,14 @@ def main() -> int:
         "--repo-dir",
         default=None,
         help="Chemin du dossier repo/ (défaut : <racine du dépôt>/repo).",
+    )
+    parser.add_argument(
+        "--main-manifest-url",
+        default=_DEFAULT_MAIN_MANIFEST_URL,
+        help=(
+            "Manifest public servant de source de vérité pour la dernière version main "
+            f"(défaut : {_DEFAULT_MAIN_MANIFEST_URL})."
+        ),
     )
     args = parser.parse_args()
 
@@ -170,6 +267,13 @@ def main() -> int:
     # manifest.local.json sert uniquement au dépôt LAN : libellés explicites dans l’UI Jellyfin.
     _apply_dev_labels(plugin, versions)
 
+    latest_main = _resolve_latest_main_version(root, str(plugin.get("guid", "")), args.main_manifest_url)
+    if latest_main is not None:
+        latest_main = _prefer_local_source_url(latest_main, base, repo_dir)
+        main_changelog = latest_main.get("changelog")
+        if isinstance(main_changelog, str):
+            latest_main["changelog"] = f"{_MAIN_CHANGELOG_PREFIX}{_strip_known_prefixes(main_changelog)}"
+
     # Version catalogue LAN liée à l'état courant du code source — réutilisée à la fois
     # pour le champ `version`, le symlink et le changelog.
     local_catalog_version, source_note = _compute_local_catalog_version(root)
@@ -189,10 +293,14 @@ def main() -> int:
         zip_path = repo_dir / name
         if not zip_path.is_file():
             missing.append(str(zip_path))
+            continue
         v["sourceUrl"] = f"{base}/{name}"
 
     if missing:
-        print("Avertissement : ZIP absents du dossier repo/ (lancez ./scripts/build-repo.sh d'abord) :", file=sys.stderr)
+        print(
+            "Avertissement : ZIP absents du dossier repo/ ; les entrées concernées gardent leur sourceUrl d'origine :",
+            file=sys.stderr,
+        )
         for m in missing:
             print(f"  - {m}", file=sys.stderr)
 
@@ -260,6 +368,9 @@ def main() -> int:
             v0["changelog"] = f"{_DEV_CHANGELOG_PREFIX}{base_changelog} {details}"
         else:
             v0["changelog"] = f"{_DEV_CHANGELOG_PREFIX}{details}"
+
+    if latest_main is not None:
+        versions[:] = _upsert_after_latest_dev(versions, latest_main)
 
     with dst.open("w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2, ensure_ascii=False)
