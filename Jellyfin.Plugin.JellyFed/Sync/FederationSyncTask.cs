@@ -660,8 +660,16 @@ public class FederationSyncTask : IScheduledTask
             Height = item.Height,
             AddedAt = item.AddedAt,
             UpdatedAt = item.UpdatedAt,
+            RuntimeTicks = MinutesToTicks(item.RuntimeMinutes),
+            BitRate = item.BitRate,
+            SizeBytes = item.SizeBytes,
+            VideoRange = item.VideoRange,
+            Edition = item.Edition,
             MediaStreams = item.MediaStreams
         };
+
+    private static long? MinutesToTicks(int? minutes)
+        => minutes.HasValue ? TimeSpan.FromMinutes(minutes.Value).Ticks : null;
 
     private static void UpsertSource(ManifestEntry entry, ManifestSource source)
     {
@@ -686,6 +694,11 @@ public class FederationSyncTask : IScheduledTask
         existing.Height = source.Height;
         existing.AddedAt = source.AddedAt;
         existing.UpdatedAt = source.UpdatedAt;
+        existing.RuntimeTicks = source.RuntimeTicks;
+        existing.BitRate = source.BitRate;
+        existing.SizeBytes = source.SizeBytes;
+        existing.VideoRange = source.VideoRange;
+        existing.Edition = source.Edition;
         existing.MediaStreams = source.MediaStreams;
         entry.Sources = sources;
     }
@@ -709,6 +722,10 @@ public class FederationSyncTask : IScheduledTask
                         AudioCodec = episode.AudioCodec,
                         Width = episode.Width,
                         Height = episode.Height,
+                        RuntimeTicks = MinutesToTicks(episode.RuntimeMinutes),
+                        BitRate = episode.BitRate,
+                        SizeBytes = episode.SizeBytes,
+                        VideoRange = episode.VideoRange,
                         MediaStreams = episode.MediaStreams
                     }
                 ]

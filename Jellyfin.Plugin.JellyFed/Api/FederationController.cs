@@ -33,6 +33,9 @@ namespace Jellyfin.Plugin.JellyFed.Api;
 [Produces(MediaTypeNames.Application.Json)]
 public class FederationController : ControllerBase
 {
+    private static readonly ExtractedStreamInfo EmptyStreamInfo =
+        new(null, null, null, null, null, null, null, null, null, []);
+
     private readonly ILibraryManager _libraryManager;
     private readonly ITaskManager _taskManager;
     private readonly FederationSyncTask _syncTask;
@@ -271,6 +274,9 @@ public class FederationController : ControllerBase
                     Width = epInfo.Width,
                     Height = epInfo.Height,
                     AudioCodec = epInfo.AudioCodec,
+                    BitRate = epInfo.BitRate,
+                    SizeBytes = epInfo.SizeBytes,
+                    VideoRange = epInfo.VideoRange,
                     MediaStreams = epInfo.MediaStreams
                 });
             }
@@ -334,7 +340,7 @@ public class FederationController : ControllerBase
             // Extract codec + all audio/subtitle tracks so the client writes complete
             // <fileinfo><streamdetails> in NFO files. Without this, Jellyfin defaults to
             // direct-play and the browser receives raw MKV/HEVC → fatal player error.
-            var info = kind == BaseItemKind.Movie ? ExtractStreamInfo(item) : default;
+            var info = kind == BaseItemKind.Movie ? ExtractStreamInfo(item) : EmptyStreamInfo;
 
             yield return new CatalogItemDto
             {
@@ -365,6 +371,10 @@ public class FederationController : ControllerBase
                 Width = info.Width,
                 Height = info.Height,
                 AudioCodec = info.AudioCodec,
+                BitRate = info.BitRate,
+                SizeBytes = info.SizeBytes,
+                VideoRange = info.VideoRange,
+                Edition = info.Edition,
                 MediaStreams = info.MediaStreams
             };
         }
@@ -1921,21 +1931,23 @@ public class FederationController : ControllerBase
             : url.Trim().TrimEnd('/');
 
     /// <summary>
-    /// Extracts codec and all audio/subtitle track info from a BaseItem.
-    /// Called for every movie and episode exported in the catalog so the receiving
-    /// server can write complete &lt;fileinfo&gt;&lt;streamdetails&gt; into NFO files.
+    /// Extracts codec, runtime-shaping metadata and all video/audio/subtitle track info from a
+    /// BaseItem. Called for every movie and episode exported in the catalog so the receiving
+    /// server can write complete &lt;fileinfo&gt;&lt;streamdetails&gt; into NFO files and the
+    /// federation provider can surface real per-stream indexes / bitrates / channels.
     /// </summary>
-    private (string? Container, string? VideoCodec, int? Width, int? Height, string? AudioCodec, IReadOnlyList<MediaStreamInfoDto> MediaStreams) ExtractStreamInfo(BaseItem item)
+    private ExtractedStreamInfo ExtractStreamInfo(BaseItem item)
     {
         if (item is not Video video)
         {
-            return (null, null, null, null, null, []);
+            return EmptyStreamInfo;
         }
 
         var container = video.Container;
         string? videoCodec = null;
         int? width = null;
         int? height = null;
+        string? videoRange = null;
         string? primaryAudioCodec = null;
         var mediaStreams = new List<MediaStreamInfoDto>();
 
@@ -1945,11 +1957,30 @@ public class FederationController : ControllerBase
 
             foreach (var s in streams)
             {
-                if (s.Type == MediaStreamType.Video && videoCodec is null)
+                if (s.Type == MediaStreamType.Video)
                 {
-                    videoCodec = s.Codec;
-                    width = s.Width;
-                    height = s.Height;
+                    if (videoCodec is null)
+                    {
+                        videoCodec = s.Codec;
+                        width = s.Width;
+                        height = s.Height;
+                        videoRange = NormalizeVideoRange(s);
+                    }
+
+                    mediaStreams.Add(new MediaStreamInfoDto
+                    {
+                        Type = "Video",
+                        Codec = s.Codec,
+                        Language = s.Language,
+                        Title = s.Title,
+                        IsDefault = s.IsDefault,
+                        IsForced = s.IsForced,
+                        Index = s.Index,
+                        BitRate = s.BitRate,
+                        Width = s.Width,
+                        Height = s.Height,
+                        VideoRange = NormalizeVideoRange(s)
+                    });
                 }
                 else if (s.Type == MediaStreamType.Audio)
                 {
@@ -1965,7 +1996,11 @@ public class FederationController : ControllerBase
                         Language = s.Language,
                         Title = s.Title,
                         IsDefault = s.IsDefault,
-                        IsForced = s.IsForced
+                        IsForced = s.IsForced,
+                        Index = s.Index,
+                        Channels = s.Channels,
+                        BitRate = s.BitRate,
+                        SampleRate = s.SampleRate
                     });
                 }
                 else if (s.Type == MediaStreamType.Subtitle)
@@ -1977,7 +2012,8 @@ public class FederationController : ControllerBase
                         Language = s.Language,
                         Title = s.Title,
                         IsDefault = s.IsDefault,
-                        IsForced = s.IsForced
+                        IsForced = s.IsForced,
+                        Index = s.Index
                     });
                 }
             }
@@ -1987,7 +2023,84 @@ public class FederationController : ControllerBase
             _logger.LogDebug(ex, "JellyFed: could not read media streams for item {Id}", item.Id);
         }
 
-        return (container, videoCodec, width, height, primaryAudioCodec, mediaStreams);
+        long? bitRate = null;
+        long? sizeBytes = null;
+        try
+        {
+            var sources = video.GetMediaSources(enablePathSubstitution: false);
+            if (sources.Count > 0)
+            {
+                bitRate = sources[0].Bitrate;
+                sizeBytes = sources[0].Size;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "JellyFed: could not read media source bitrate/size for item {Id}", item.Id);
+        }
+
+        var edition = ExtractEdition(video);
+
+        return new ExtractedStreamInfo(
+            container,
+            videoCodec,
+            width,
+            height,
+            primaryAudioCodec,
+            bitRate,
+            sizeBytes,
+            videoRange,
+            edition,
+            mediaStreams);
+    }
+
+    /// <summary>
+    /// Normalises HDR-related metadata into a single short token (SDR / HDR10 / DV / HLG…).
+    /// Jellyfin's MediaStream uses <c>VideoRange</c> (HDR/SDR) plus <c>VideoRangeType</c>
+    /// (HDR10/HDR10+/HLG/DV…). The richer one wins when available.
+    /// </summary>
+    private static string? NormalizeVideoRange(MediaStream stream)
+    {
+        var rangeType = stream.VideoRangeType.ToString();
+        if (!string.IsNullOrEmpty(rangeType) && !string.Equals(rangeType, "Unknown", StringComparison.OrdinalIgnoreCase))
+        {
+            return rangeType;
+        }
+
+        var range = stream.VideoRange.ToString();
+        return string.IsNullOrEmpty(range) || string.Equals(range, "Unknown", StringComparison.OrdinalIgnoreCase)
+            ? null
+            : range;
+    }
+
+    /// <summary>
+    /// Extracts a Jellyfin-style edition tag from the file/folder name (<c>[edition-XXX]</c> or
+    /// <c>{edition-XXX}</c>). Returns <c>null</c> when no tag is present.
+    /// </summary>
+    private static string? ExtractEdition(Video video)
+    {
+        var folderName = string.IsNullOrWhiteSpace(video.ContainingFolderPath)
+            ? null
+            : System.IO.Path.GetFileName(video.ContainingFolderPath);
+
+        foreach (var candidate in new[] { video.FileNameWithoutExtension, folderName })
+        {
+            if (string.IsNullOrWhiteSpace(candidate))
+            {
+                continue;
+            }
+
+            var match = System.Text.RegularExpressions.Regex.Match(
+                candidate,
+                @"[\[\{]edition-([^\]\}]+)[\]\}]",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (match.Success)
+            {
+                return match.Groups[1].Value.Trim();
+            }
+        }
+
+        return null;
     }
 
     /// <summary>

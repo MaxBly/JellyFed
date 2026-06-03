@@ -67,11 +67,18 @@ public class FederationMediaSourceProvider : IMediaSourceProvider
             return [];
         }
 
+        // Le peer primaire est déjà représenté par la MediaSource native du .strm
+        // (créée par le core Jellyfin, le core ne pouvant être supprimé par un
+        // IMediaSourceProvider). On ne ré-émet donc QUE les sources alternatives
+        // → PlaybackInfo = native(primaire) + alternates, sans doublon de la primaire.
+        var primaryPeer = sourcesFile.PrimaryPeerName;
+
         if (string.Equals(sourcesFile.ItemType, "Movie", StringComparison.OrdinalIgnoreCase))
         {
             return sourcesFile.Sources
-                .Where(static source => !string.IsNullOrWhiteSpace(source.StreamUrl))
-                .Select((source, index) => BuildMediaSource(item, source, index, sourcesFile.PrimaryPeerName))
+                .Where(source => !string.IsNullOrWhiteSpace(source.StreamUrl)
+                    && !string.Equals(source.PeerName, primaryPeer, StringComparison.OrdinalIgnoreCase))
+                .Select((source, index) => BuildMediaSource(item, source, index, primaryPeer))
                 .ToList();
         }
 
@@ -92,8 +99,9 @@ public class FederationMediaSourceProvider : IMediaSourceProvider
         }
 
         return episodeGroup.Sources
-            .Where(static source => !string.IsNullOrWhiteSpace(source.StreamUrl))
-            .Select((source, index) => BuildMediaSource(item, source, index, sourcesFile.PrimaryPeerName))
+            .Where(source => !string.IsNullOrWhiteSpace(source.StreamUrl)
+                && !string.Equals(source.PeerName, primaryPeer, StringComparison.OrdinalIgnoreCase))
+            .Select((source, index) => BuildMediaSource(item, source, index, primaryPeer))
             .ToList();
     }
 
@@ -130,7 +138,9 @@ public class FederationMediaSourceProvider : IMediaSourceProvider
             SupportsTranscoding = true,
             SupportsProbing = mediaStreams.Count == 0,
             Type = MediaSourceType.Default,
-            RunTimeTicks = item.RunTimeTicks,
+            RunTimeTicks = source.RuntimeTicks ?? item.RunTimeTicks,
+            Bitrate = source.BitRate.HasValue ? (int?)Math.Min(source.BitRate.Value, int.MaxValue) : null,
+            Size = source.SizeBytes,
             MediaStreams = mediaStreams,
             DefaultAudioStreamIndex = defaultAudioStream?.Index,
             DefaultSubtitleStreamIndex = defaultSubtitleStream?.Index,
@@ -188,7 +198,7 @@ public class FederationMediaSourceProvider : IMediaSourceProvider
     {
         return new MediaStream
         {
-            Index = -1,
+            Index = stream.Index ?? -1,
             Type = ParseMediaStreamType(stream.Type),
             Codec = stream.Codec,
             Language = stream.Language,
@@ -196,7 +206,12 @@ public class FederationMediaSourceProvider : IMediaSourceProvider
             IsDefault = stream.IsDefault,
             IsForced = stream.IsForced,
             IsExternal = false,
-            SupportsExternalStream = false
+            SupportsExternalStream = false,
+            Channels = stream.Channels,
+            BitRate = stream.BitRate.HasValue ? (int?)Math.Min(stream.BitRate.Value, int.MaxValue) : null,
+            Width = stream.Width,
+            Height = stream.Height,
+            SampleRate = stream.SampleRate
         };
     }
 

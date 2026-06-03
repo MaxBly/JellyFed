@@ -38,6 +38,22 @@ public class ManifestSource
     /// <summary>Gets or sets when the source item was updated on the peer.</summary>
     public string? UpdatedAt { get; set; }
 
-    /// <summary>Gets or sets all audio and subtitle tracks known for this source.</summary>
+    /// <summary>Gets or sets the runtime in 100ns ticks for this specific source (different cuts
+    /// can have different runtimes — Director's Cut, Theatrical, etc.).</summary>
+    public long? RuntimeTicks { get; set; }
+
+    /// <summary>Gets or sets the total bitrate in bits per second for this source.</summary>
+    public long? BitRate { get; set; }
+
+    /// <summary>Gets or sets the file size in bytes for this source.</summary>
+    public long? SizeBytes { get; set; }
+
+    /// <summary>Gets or sets the colour range / HDR variant ("SDR", "HDR10", "DV"…).</summary>
+    public string? VideoRange { get; set; }
+
+    /// <summary>Gets or sets the edition tag if any (Director's Cut, Theatrical, Extended…).</summary>
+    public string? Edition { get; set; }
+
+    /// <summary>Gets or sets all known tracks (video, audio, subtitle) for this source.</summary>
     public IReadOnlyList<MediaStreamInfoDto> MediaStreams { get; set; } = [];
 }

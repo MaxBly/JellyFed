@@ -71,7 +71,19 @@ public class CatalogItemDto
     /// <summary>Gets or sets the audio codec (e.g. aac, ac3).</summary>
     public string? AudioCodec { get; set; }
 
-    /// <summary>Gets or sets all audio and subtitle tracks.</summary>
+    /// <summary>Gets or sets the total bitrate in bits per second for this source.</summary>
+    public long? BitRate { get; set; }
+
+    /// <summary>Gets or sets the file size in bytes for this source.</summary>
+    public long? SizeBytes { get; set; }
+
+    /// <summary>Gets or sets the colour range ("SDR", "HDR10", "DV"…).</summary>
+    public string? VideoRange { get; set; }
+
+    /// <summary>Gets or sets the edition tag if any (Director's Cut, Theatrical, Extended…).</summary>
+    public string? Edition { get; set; }
+
+    /// <summary>Gets or sets all video, audio and subtitle tracks.</summary>
     [JsonPropertyName("mediaStreams")]
     public IReadOnlyList<MediaStreamInfoDto> MediaStreams { get; set; } = [];
 }
