@@ -1,3 +1,5 @@
+using System;
+using System.Globalization;
 using System.IO;
 using System.Text.Json;
 using Jellyfin.Plugin.JellyFed.Configuration;
@@ -32,6 +34,14 @@ public static class ManifestStore
         {
             var json = File.ReadAllText(path);
             var manifest = JsonSerializer.Deserialize<Manifest>(json, JsonOptions);
+            if (UsesLegacyMaterializedLayout(manifest))
+            {
+                var emptyManifest = new Manifest();
+                ArchiveLegacyManifest(path, manifest!.SchemaVersion);
+                Save(libraryPath, emptyManifest);
+                return emptyManifest;
+            }
+
             manifest = SchemaMigrator.MigrateManifest(manifest, out var changed);
             if (changed)
             {
@@ -65,5 +75,45 @@ public static class ManifestStore
         var path = Path.Combine(libraryPath, FederationSyncTask.ManifestFileName);
         var json = JsonSerializer.Serialize(manifest, JsonOptions);
         File.WriteAllText(path, json);
+    }
+
+    private static bool UsesLegacyMaterializedLayout(Manifest? manifest)
+    {
+        if (manifest is null || manifest.SchemaVersion >= FederationProtocol.CurrentSchemaVersion)
+        {
+            return false;
+        }
+
+        return (manifest.Movies?.Count ?? 0) > 0 || (manifest.Series?.Count ?? 0) > 0;
+    }
+
+    private static void ArchiveLegacyManifest(string path, int schemaVersion)
+    {
+        var directory = Path.GetDirectoryName(path) ?? string.Empty;
+        var fileName = Path.GetFileNameWithoutExtension(path);
+        var extension = Path.GetExtension(path);
+        var timestamp = DateTime.UtcNow.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture);
+        var archiveBasePath = Path.Combine(
+            directory,
+            string.Format(
+                CultureInfo.InvariantCulture,
+                "{0}.schema-v{1}.archived-{2}",
+                fileName,
+                schemaVersion,
+                timestamp));
+        var archivePath = archiveBasePath + extension;
+        var suffix = 1;
+        while (File.Exists(archivePath))
+        {
+            archivePath = string.Format(
+                CultureInfo.InvariantCulture,
+                "{0}-{1}{2}",
+                archiveBasePath,
+                suffix,
+                extension);
+            suffix++;
+        }
+
+        File.Move(path, archivePath);
     }
 }
