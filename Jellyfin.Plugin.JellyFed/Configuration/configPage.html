@@ -43,10 +43,26 @@
                     .jf-modal-backdrop { position:fixed; inset:0; background:rgba(0,0,0,.6); display:none; align-items:center; justify-content:center; z-index:9999; }
                     .jf-modal-backdrop.open { display:flex; }
                     .jf-modal { background:#1e1e1e; border:1px solid #444; border-radius:6px; padding:1.5em; min-width:320px; max-width:90vw; }
+                    .jf-readme-hero { border:1px solid #333; border-radius:10px; padding:1.25em; margin-bottom:1.25em; background:linear-gradient(135deg, rgba(0,164,220,.16), rgba(255,255,255,.03)); }
+                    .jf-readme-hero h2 { margin-top:0; font-size:1.8em; }
+                    .jf-readme-hero p { max-width:760px; line-height:1.55; }
+                    .jf-readme-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:.85em; margin:1em 0 1.4em; }
+                    .jf-readme-card { border:1px solid #333; border-radius:8px; padding:1em; background:rgba(255,255,255,.025); }
+                    .jf-readme-card strong { display:block; color:#fff; margin-bottom:.35em; }
+                    .jf-readme-card p { margin:0; color:#bbb; line-height:1.45; }
+                    .jf-readme-flow { display:flex; align-items:stretch; gap:.6em; flex-wrap:wrap; margin:1em 0; }
+                    .jf-flow-step { flex:1 1 150px; border:1px solid #333; border-radius:8px; padding:.85em; background:#151515; }
+                    .jf-flow-step span { display:block; color:#00a4dc; font-weight:600; margin-bottom:.25em; }
+                    .jf-flow-arrow { align-self:center; color:#888; font-size:1.3em; }
                     .jf-readme-section { margin-bottom:1.5em; }
+                    .jf-readme-section details { border:1px solid #333; border-radius:8px; padding:.85em 1em; margin-bottom:.75em; background:rgba(255,255,255,.02); }
+                    .jf-readme-section summary { cursor:pointer; font-weight:600; color:#fff; }
                     .jf-readme-section pre { background:#111; border:1px solid #333; border-radius:4px; padding:1em; overflow:auto; font-size:.85em; line-height:1.4; }
                     .jf-readme-section ol { padding-left:1.5em; line-height:1.8; }
                     .jf-readme-section code { background:#1a1a1a; padding:.1em .4em; border-radius:3px; }
+                    .jf-readme-links { display:flex; gap:.6em; flex-wrap:wrap; margin-top:1em; }
+                    .jf-readme-links a { border:1px solid #333; border-radius:999px; padding:.45em .8em; color:#ddd; text-decoration:none; background:rgba(255,255,255,.03); }
+                    .jf-readme-links a:hover { border-color:#00a4dc; color:#fff; }
                     .jf-log-summary { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:.75em; margin-bottom:1em; }
                     .jf-log-card { border:1px solid #333; border-radius:6px; padding:.85em; background:rgba(255,255,255,.02); }
                     .jf-log-card strong { display:block; font-size:1.35em; color:#fff; }
@@ -65,74 +81,124 @@
                 </div>
 
                 <div class="jf-tabs" role="tablist">
-                    <button type="button" class="jf-tab active" data-tab="readme">Readme</button>
+                    <button type="button" class="jf-tab active" data-tab="readme">README</button>
                     <button type="button" class="jf-tab" data-tab="settings">Settings</button>
                     <button type="button" class="jf-tab" data-tab="peers">Peers</button>
                     <button type="button" class="jf-tab" data-tab="logs">Logs</button>
                     <button type="button" class="jf-tab" data-tab="danger">Danger Zone</button>
                 </div>
 
-                <!-- ══════════════ Readme tab ══════════════ -->
+                <!-- ══════════════ README tab ══════════════ -->
                 <section class="jf-tab-panel active" data-panel="readme">
 
-                    <div class="jf-readme-section">
-                        <h2>Federation native d'instances Jellyfin</h2>
+                    <div class="jf-readme-hero">
+                        <h2>Native federation for Jellyfin servers</h2>
                         <p>
-                            JellyFed connecte plusieurs serveurs Jellyfin entre eux. Depuis un seul client, tu accèdes aux
-                            bibliothèques de toutes les instances fédérées — avec artwork, métadonnées, pistes audio/sous-titres
-                            et transcodage HLS — de façon transparente pour tous les clients officiels.
+                            JellyFed connects Jellyfin servers together and materializes remote libraries as native
+                            Jellyfin media. Users keep using their normal Jellyfin clients while remote movies and
+                            shows appear with metadata, artwork, audio tracks, subtitles and Jellyfin-managed playback.
                         </p>
+                        <div class="jf-readme-links">
+                            <a href="https://github.com/qcormand/JellyFed#readme" target="_blank" rel="noopener noreferrer">Project README</a>
+                            <a href="https://github.com/qcormand/JellyFed/blob/main/docs/architecture.md" target="_blank" rel="noopener noreferrer">Architecture</a>
+                            <a href="https://github.com/qcormand/JellyFed/blob/main/docs/api.md" target="_blank" rel="noopener noreferrer">API reference</a>
+                            <a href="https://github.com/qcormand/JellyFed/blob/main/docs/strm.md" target="_blank" rel="noopener noreferrer">.strm and NFO layout</a>
+                        </div>
+                    </div>
+
+                    <div class="jf-readme-grid">
+                        <div class="jf-readme-card">
+                            <strong>One Jellyfin experience</strong>
+                            <p>Remote items are indexed as regular library entries, so official clients need no plugin.</p>
+                        </div>
+                        <div class="jf-readme-card">
+                            <strong>Peer-to-peer control</strong>
+                            <p>Admins choose which peers can sync movies, series and anime, with per-peer actions.</p>
+                        </div>
+                        <div class="jf-readme-card">
+                            <strong>Server-side playback</strong>
+                            <p>Streams go through Jellyfin-compatible URLs and can use Jellyfin's native pipeline.</p>
+                        </div>
+                        <div class="jf-readme-card">
+                            <strong>Auditable federation</strong>
+                            <p>Security, peer connection and access events are visible from the Logs tab.</p>
+                        </div>
                     </div>
 
                     <div class="jf-readme-section">
-                        <h3>Concept</h3>
-<pre>[Client Jellyfin]
-       |
-       v
-[Instance A  &lt;---- JellyFed ----&gt;  Instance B]
-       |                                 |
-  Bibliothèque A                   Bibliothèque B
-  (locale)                         (partagée via .strm + NFO)</pre>
-                        <p>
-                            L'instance A installe JellyFed et se connecte à l'instance B. Le plugin synchronise le catalogue
-                            de B dans A sous forme de <code>.strm</code> + <code>.nfo</code>. Les clients voient les médias de B
-                            comme s'ils étaient locaux.
-                        </p>
+                        <h3>How it works</h3>
+                        <div class="jf-readme-flow" aria-label="JellyFed federation flow">
+                            <div class="jf-flow-step">
+                                <span>1. Connect peers</span>
+                                Exchange URLs and federation tokens between trusted Jellyfin servers.
+                            </div>
+                            <div class="jf-flow-arrow" aria-hidden="true">-&gt;</div>
+                            <div class="jf-flow-step">
+                                <span>2. Sync catalogs</span>
+                                JellyFed writes one <code>.strm</code> and <code>.nfo</code> source per peer.
+                            </div>
+                            <div class="jf-flow-arrow" aria-hidden="true">-&gt;</div>
+                            <div class="jf-flow-step">
+                                <span>3. Browse locally</span>
+                                Jellyfin scans the JellyFed folders and presents remote media as native items.
+                            </div>
+                        </div>
                     </div>
 
                     <div class="jf-readme-section">
-                        <h3>Setup rapide</h3>
+                        <h3>Quick setup checklist</h3>
                         <ol>
                             <li>
-                                Onglet <strong>Settings</strong> : copie ton <em>Federation Token</em> (auto-généré) et
-                                partage-le avec tes peers — ils en auront besoin pour ajouter ta machine.
+                                Open <strong>Settings</strong>, copy this server's <em>Federation Token</em> and share it
+                                only with trusted peer admins.
                             </li>
                             <li>
-                                Remplis <code>Instance Name</code>, <code>Self URL</code> (URL accessible depuis tes peers) et
-                                les racines <code>Movies / Series / Anime</code>. Optionnel : <code>Jellyfin API Key</code>
-                                pour du transcodage HLS natif.
+                                Fill in <code>Instance Name</code>, <code>Self URL</code> and the movie, series and anime
+                                roots. Add a <code>Jellyfin API Key</code> if you want Jellyfin-native transcoding.
                             </li>
                             <li>
-                                Onglet <strong>Peers</strong> → <em>Add peer</em>. Renseigne le nom, l'URL et le token
-                                partagés par le peer distant. Les peers découverts restent des suggestions : un admin doit
-                                toujours confirmer l'ajout manuel avant toute sync.
+                                Open <strong>Peers</strong>, choose <em>Add peer</em>, then enter the remote peer name,
+                                URL and token. Discovery suggestions never sync until an admin adds them manually.
                             </li>
                             <li>
-                                Ajoute des bibliothèques Jellyfin pointant vers <code>{MoviesRoot}</code>, <code>{SeriesRoot}</code>
-                                et <code>{AnimeRoot}</code> (types Films / Séries selon ton usage). Les <code>.strm</code> sont
-                                rangés par item, avec un fichier par peer dans le dossier du média.
+                                Create Jellyfin libraries pointing to <code>{MoviesRoot}</code>, <code>{SeriesRoot}</code>
+                                and <code>{AnimeRoot}</code>. Each media folder contains one peer-specific source file,
+                                so Jellyfin can group local and federated versions together.
                             </li>
                         </ol>
                     </div>
 
                     <div class="jf-readme-section">
-                        <h3>Documentation complète</h3>
-                        <ul>
-                            <li><a href="https://github.com/qcormand/JellyFed#readme" target="_blank" rel="noopener noreferrer">README sur GitHub</a></li>
-                            <li><a href="https://github.com/qcormand/JellyFed/blob/main/docs/architecture.md" target="_blank" rel="noopener noreferrer">Architecture technique</a></li>
-                            <li><a href="https://github.com/qcormand/JellyFed/blob/main/docs/api.md" target="_blank" rel="noopener noreferrer">Référence API</a></li>
-                            <li><a href="https://github.com/qcormand/JellyFed/blob/main/docs/strm.md" target="_blank" rel="noopener noreferrer">Format .strm / NFO</a></li>
-                        </ul>
+                        <h3>Details</h3>
+                        <details open>
+                            <summary>What gets written on disk?</summary>
+                            <p>
+                                JellyFed writes a flattened, item-based layout. A movie folder can contain several
+                                peer-specific <code>.strm</code> and <code>.nfo</code> files next to shared artwork,
+                                allowing Jellyfin to merge them as alternate versions of the same item.
+                            </p>
+<pre>{MoviesRoot}/
+  Movie Name (2024) [tmdbid-123]/
+    Movie Name (2024) [peer-a].strm
+    Movie Name (2024) [peer-a].nfo
+    Movie Name (2024) [peer-b].strm
+    Movie Name (2024) [peer-b].nfo
+    poster.jpg</pre>
+                        </details>
+                        <details>
+                            <summary>Which clients are supported?</summary>
+                            <p>
+                                Any client that can browse and play Jellyfin libraries can consume JellyFed content.
+                                The federation layer runs on the server; clients do not need JellyFed-specific code.
+                            </p>
+                        </details>
+                        <details>
+                            <summary>How should the Self URL be chosen?</summary>
+                            <p>
+                                Use the URL that peer servers can actually reach. In mixed LAN/public setups, prefer
+                                the address that remote Jellyfin/FFmpeg processes can access reliably.
+                            </p>
+                        </details>
                     </div>
 
                 </section>
@@ -174,16 +240,16 @@
                                    class="emby-input" placeholder="/config/data/jellyfed-library" />
                             <div class="fieldDescription">
                                 Directory for <code>.jellyfed-manifest.json</code> and <code>.jellyfed-peers.json</code> only.
-                                Default is under Jellyfin data. Movies / series / anime .strm trees use the roots below (each with a subfolder per peer).
+                                Default is under Jellyfin data. Movies, series and anime <code>.strm</code> trees use the roots below.
                             </div>
                         </div>
 
                         <div class="inputContainer">
                             <label class="inputLabel inputLabelUnfocused" for="moviesRootPath">Movies root path</label>
                             <input id="moviesRootPath" name="MoviesRootPath" type="text" class="emby-input"
-                                   placeholder="(default: Metadata path/Films)" />
+                                   placeholder="(default: under metadata path)" />
                             <div class="fieldDescription">
-                                Absolute folder for federated <strong>movies</strong>. Each peer gets <code>{MoviesRoot}/{PeerName}/…</code>.
+                                Absolute folder for federated <strong>movies</strong>. Items are grouped by media, with one source file per peer.
                             </div>
                         </div>
 
@@ -192,16 +258,16 @@
                             <input id="seriesRootPath" name="SeriesRootPath" type="text" class="emby-input"
                                    placeholder="(default: Metadata path/Series)" />
                             <div class="fieldDescription">
-                                Absolute folder for federated <strong>TV series</strong>. Layout <code>{SeriesRoot}/{PeerName}/…</code>.
+                                Absolute folder for federated <strong>TV series</strong>. Episodes are grouped by show/season, with one source file per peer.
                             </div>
                         </div>
 
                         <div class="inputContainer">
                             <label class="inputLabel inputLabelUnfocused" for="animeRootPath">Anime root path</label>
                             <input id="animeRootPath" name="AnimeRootPath" type="text" class="emby-input"
-                                   placeholder="(default: Metadata path/Animes)" />
+                                   placeholder="(default: under metadata path)" />
                             <div class="fieldDescription">
-                                Absolute folder for items whose genres include an anime tag. Layout <code>{AnimeRoot}/{PeerName}/…</code>.
+                                Absolute folder for items whose genres include an anime tag. Items are grouped by media, with one source file per peer.
                             </div>
                         </div>
 
@@ -715,8 +781,8 @@
                         '</div>' +
                         '<div class="jf-peer-toggles">' +
                             '<label><input type="checkbox" class="jf-t-enabled" ' + (peer.enabled ? 'checked' : '') + ' /> Enabled</label>' +
-                            '<label><input type="checkbox" class="jf-t-movies" ' + (peer.syncMovies ? 'checked' : '') + ' /> Films</label>' +
-                            '<label><input type="checkbox" class="jf-t-series" ' + (peer.syncSeries ? 'checked' : '') + ' /> Séries</label>' +
+                            '<label><input type="checkbox" class="jf-t-movies" ' + (peer.syncMovies ? 'checked' : '') + ' /> Movies</label>' +
+                            '<label><input type="checkbox" class="jf-t-series" ' + (peer.syncSeries ? 'checked' : '') + ' /> Series</label>' +
                             '<label><input type="checkbox" class="jf-t-anime" ' + (peer.syncAnime ? 'checked' : '') + ' /> Anime</label>' +
                         '</div>' +
                         '<div class="jf-peer-actions">' +

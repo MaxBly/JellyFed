@@ -85,10 +85,14 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
             new PluginPageInfo
             {
                 Name = Name,
+                DisplayName = Name,
                 EmbeddedResourcePath = string.Format(
                     CultureInfo.InvariantCulture,
                     "{0}.Configuration.configPage.html",
-                    GetType().Namespace)
+                    GetType().Namespace),
+                EnableInMainMenu = true,
+                MenuSection = "plugins",
+                MenuIcon = "hub"
             }
         ];
     }
