@@ -158,7 +158,7 @@ public class FederationController : ControllerBase
         [FromQuery] int limit = 5000,
         [FromQuery] int offset = 0)
     {
-        var baseUrl = GetBaseUrl();
+        var baseUrl = GetAdvertisedBaseUrl();
         var token = GetEffectivePeerTokenOrGlobal();
         var apiKey = Plugin.Instance?.Configuration?.JellyfinApiKey;
 
@@ -224,7 +224,7 @@ public class FederationController : ControllerBase
             return NotFound();
         }
 
-        var baseUrl = GetBaseUrl();
+        var baseUrl = GetAdvertisedBaseUrl();
         var token = GetEffectivePeerTokenOrGlobal();
         var apiKey = Plugin.Instance?.Configuration?.JellyfinApiKey;
 
@@ -669,138 +669,6 @@ public class FederationController : ControllerBase
     }
 
     /// <summary>
-    /// Returns federated items that currently have more than one known upstream source.
-    /// Used by the admin UI to let an operator promote a different source.
-    /// </summary>
-    /// <param name="search">Optional search string matched against title, key and peer names.</param>
-    /// <param name="limit">Maximum number of items to return.</param>
-    /// <returns>Multi-source items for admin source selection.</returns>
-    [HttpGet("admin/sources")]
-    [AllowAnonymous]
-    [ServiceFilter(typeof(AdminAccessFilter))]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-    [ProducesResponseType(StatusCodes.Status403Forbidden)]
-    public ActionResult GetAdminSources([FromQuery] string? search = null, [FromQuery] int limit = 100)
-    {
-        var config = Plugin.Instance?.Configuration;
-        if (config is null || string.IsNullOrWhiteSpace(config.LibraryPath))
-        {
-            return Ok(new { items = Array.Empty<object>() });
-        }
-
-        limit = Math.Clamp(limit, 1, 500);
-        var manifest = ManifestStore.Load(config.LibraryPath);
-        var needle = string.IsNullOrWhiteSpace(search) ? null : search.Trim();
-        var items = new List<object>();
-
-        AppendMultiSourceItems(items, manifest.Movies, "Movie", needle, limit);
-        if (items.Count < limit)
-        {
-            AppendMultiSourceItems(items, manifest.Series, "Series", needle, limit);
-        }
-
-        return Ok(new { items });
-    }
-
-    /// <summary>
-    /// Promotes one source as the current primary source for a federated item and rewrites
-    /// the local materialization so future playback uses the selected peer.
-    /// </summary>
-    /// <param name="request">Selection request.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Updated primary source summary.</returns>
-    [HttpPost("admin/sources/select")]
-    [AllowAnonymous]
-    [ServiceFilter(typeof(AdminAccessFilter))]
-    [SuppressMessage("Security", "CA3003:Review code for file path injection vulnerabilities", Justification = "Selection only promotes an existing manifest entry loaded from disk; no request-provided path is used directly.")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-    [ProducesResponseType(StatusCodes.Status403Forbidden)]
-    public async Task<ActionResult> SelectPrimarySource(
-        [FromBody] SelectPrimarySourceRequestDto request,
-        CancellationToken cancellationToken)
-    {
-        if (string.IsNullOrWhiteSpace(request.ItemType) ||
-            string.IsNullOrWhiteSpace(request.ItemKey) ||
-            string.IsNullOrWhiteSpace(request.PeerName))
-        {
-            return BadRequest("ItemType, ItemKey and PeerName are required.");
-        }
-
-        var config = Plugin.Instance?.Configuration;
-        if (config is null || string.IsNullOrWhiteSpace(config.LibraryPath))
-        {
-            return BadRequest("LibraryPath is not configured.");
-        }
-
-        var manifest = ManifestStore.Load(config.LibraryPath);
-        var entries = string.Equals(request.ItemType, "Movie", StringComparison.OrdinalIgnoreCase)
-            ? manifest.Movies
-            : string.Equals(request.ItemType, "Series", StringComparison.OrdinalIgnoreCase)
-                ? manifest.Series
-                : null;
-        if (entries is null)
-        {
-            return BadRequest("ItemType must be Movie or Series.");
-        }
-
-        if (!entries.TryGetValue(request.ItemKey, out var entry))
-        {
-            return NotFound();
-        }
-
-        entry.Sources ??= [];
-        if (entry.Sources.Count == 0 && !string.IsNullOrWhiteSpace(entry.PeerName))
-        {
-            entry.Sources =
-            [
-                new ManifestSource
-                {
-                    PeerName = entry.PeerName,
-                    JellyfinId = entry.JellyfinId
-                }
-            ];
-        }
-
-        var selected = entry.Sources.FirstOrDefault(source =>
-            string.Equals(source.PeerName, request.PeerName, StringComparison.OrdinalIgnoreCase));
-        if (selected is null)
-        {
-            return BadRequest("Selected source is not available for this item.");
-        }
-
-        entry.PeerName = selected.PeerName;
-        entry.JellyfinId = selected.JellyfinId;
-        TryMoveEntryToPrimaryPeerFolder(entry);
-        await RehydratePromotedEntryAsync(entry, request.ItemKey, request.ItemType, config, cancellationToken).ConfigureAwait(false);
-        entry.SyncedAt = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
-        ManifestStore.Save(config.LibraryPath, manifest);
-        _libraryManager.QueueLibraryScan();
-
-        var selectedPeer = config.Peers.FirstOrDefault(peer =>
-            string.Equals(peer.Name, entry.PeerName, StringComparison.OrdinalIgnoreCase));
-        if (selectedPeer is not null)
-        {
-            _auditLogService.WritePeerEvent(
-                selectedPeer,
-                "peer.source-promoted",
-                $"Promoted {selectedPeer.Name} as the primary source for {Path.GetFileName(entry.Path)}.",
-                details: new { request.ItemType, request.ItemKey });
-        }
-
-        return Ok(new
-        {
-            status = "ok",
-            itemType = request.ItemType,
-            itemKey = request.ItemKey,
-            primaryPeerName = entry.PeerName,
-            title = GetEntryDisplayTitle(entry)
-        });
-    }
-
-    /// <summary>
     /// Purges all synced .strm files for a given peer from the manifest and filesystem.
     /// </summary>
     /// <param name="request">The peer name to purge.</param>
@@ -879,13 +747,9 @@ public class FederationController : ControllerBase
         foreach (var peer in config.Peers)
         {
             states.TryGetValue(peer.Name, out var status);
-            var peerSeg = StrmWriter.SanitizePeerFolderSegment(peer.Name);
-
-            var moviesFolder = CombinePeerFolder(moviesRoot, peerSeg);
-            var seriesFolder = CombinePeerFolder(seriesRoot, peerSeg);
-            var animeFolder = CombinePeerFolder(animeRoot, peerSeg);
 
             int localMovies = 0, localSeries = 0, localAnime = 0;
+            long diskBytes = 0;
 
             foreach (var entry in manifest.Movies.Values)
             {
@@ -902,6 +766,8 @@ public class FederationController : ControllerBase
                 {
                     localMovies++;
                 }
+
+                diskBytes += SourceDiskBytes(entry, peer.Name);
             }
 
             foreach (var entry in manifest.Series.Values)
@@ -919,12 +785,9 @@ public class FederationController : ControllerBase
                 {
                     localSeries++;
                 }
-            }
 
-            long diskBytes = 0;
-            diskBytes += DirectorySize(moviesFolder);
-            diskBytes += DirectorySize(seriesFolder);
-            diskBytes += DirectorySize(animeFolder);
+                diskBytes += SourceDiskBytes(entry, peer.Name);
+            }
 
             if (status?.LastSyncAt is not null &&
                 (latestSyncAt is null ||
@@ -960,9 +823,9 @@ public class FederationController : ControllerBase
                 LocalSeriesCount = localSeries,
                 LocalAnimeCount = localAnime,
                 LocalDiskBytes = diskBytes,
-                MoviesFolder = moviesFolder,
-                SeriesFolder = seriesFolder,
-                AnimeFolder = animeFolder
+                MoviesFolder = string.IsNullOrWhiteSpace(moviesRoot) ? null : moviesRoot,
+                SeriesFolder = string.IsNullOrWhiteSpace(seriesRoot) ? null : seriesRoot,
+                AnimeFolder = string.IsNullOrWhiteSpace(animeRoot) ? null : animeRoot
             });
         }
 
@@ -1475,7 +1338,7 @@ public class FederationController : ControllerBase
             // support. This allows the client's FFmpeg to seek within the stream (for HLS
             // transcoding). Static=false would start a transcoding session on the source,
             // which doesn't support range-based seeking.
-            return Redirect($"{GetBaseUrl()}/Videos/{itemId}/stream?api_key={apiKey}&Static=true");
+            return Redirect($"{GetAdvertisedBaseUrl()}/Videos/{itemId}/stream?api_key={apiKey}&Static=true");
         }
 
         // Fallback: serve the file directly (no transcoding — client must support the format).
@@ -2112,6 +1975,17 @@ public class FederationController : ControllerBase
         return $"{scheme}://{Request.Host}{Request.PathBase.Value?.TrimEnd('/')}";
     }
 
+    private string GetAdvertisedBaseUrl()
+    {
+        var selfUrl = Plugin.Instance?.Configuration.SelfUrl;
+        if (!string.IsNullOrWhiteSpace(selfUrl))
+        {
+            return selfUrl.Trim().TrimEnd('/');
+        }
+
+        return GetBaseUrl();
+    }
+
     /// <summary>
     /// Returns an image URL. Uses the native Jellyfin Images API when an API key is available
     /// (avoids the JellyFed proxy hop and is more reliable), otherwise falls back to the
@@ -2152,18 +2026,6 @@ public class FederationController : ControllerBase
         };
     }
 
-    private static string? CombinePeerFolder(string root, string peerSeg)
-    {
-        if (string.IsNullOrWhiteSpace(root))
-        {
-            return null;
-        }
-
-        return Path.Combine(
-            root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
-            peerSeg);
-    }
-
     private static bool IsUnderRoot(string? path, string root)
     {
         if (string.IsNullOrWhiteSpace(path) || string.IsNullOrWhiteSpace(root))
@@ -2176,46 +2038,10 @@ public class FederationController : ControllerBase
                path.StartsWith(r + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
     }
 
-    [SuppressMessage("Security", "CA3003:Review code for file path injection vulnerabilities", Justification = "Path is built from admin-configured roots + sanitized peer segments, not user input.")]
-    private static long DirectorySize(string? path)
-    {
-        if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
-        {
-            return 0;
-        }
-
-        try
-        {
-            long total = 0;
-            foreach (var file in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories))
-            {
-                try
-                {
-                    total += new FileInfo(file).Length;
-                }
-#pragma warning disable CA1031 // Best effort: ignore transient IO errors (file deleted/locked).
-                catch
-                {
-                    // File may have been deleted between enumeration and FileInfo access.
-                }
-#pragma warning restore CA1031
-            }
-
-            return total;
-        }
-#pragma warning disable CA1031 // Best effort: directory may have become inaccessible.
-        catch
-        {
-            return 0;
-        }
-#pragma warning restore CA1031
-    }
-
     /// <summary>
     /// Shared purge pipeline used by both the name-based <c>/peer/{name}/purge</c> endpoint and
-    /// <c>/peer/{name}/remove</c>. Removes this peer from the manifest, preserves logical items
-    /// that still have alternate sources, refreshes their primary-source materialization when
-    /// possible, clears deleted Jellyfin library rows and deletes empty per-peer subfolders.
+    /// <c>/peer/{name}/remove</c>. Removes this peer's materialized files from flattened item
+    /// folders and preserves logical items that still have alternate sources.
     /// </summary>
     [SuppressMessage("Security", "CA3003:Review code for file path injection vulnerabilities", Justification = "Paths come from the plugin manifest written by this plugin and admin-configured roots.")]
     private async Task<(int DeletedMovies, int DeletedSeries)> PurgePeerDataAsync(
@@ -2226,9 +2052,9 @@ public class FederationController : ControllerBase
         var manifest = ManifestStore.Load(config.LibraryPath);
 
         var deletedPaths = new List<string>();
-        var deletedMovies = await RemovePeerFromEntriesAsync(manifest.Movies, peerName, "Movie", config, deletedPaths, cancellationToken)
+        var deletedMovies = await RemovePeerFromEntriesAsync(manifest.Movies, peerName, deletedPaths, cancellationToken)
             .ConfigureAwait(false);
-        var deletedSeries = await RemovePeerFromEntriesAsync(manifest.Series, peerName, "Series", config, deletedPaths, cancellationToken)
+        var deletedSeries = await RemovePeerFromEntriesAsync(manifest.Series, peerName, deletedPaths, cancellationToken)
             .ConfigureAwait(false);
 
         ManifestStore.Save(config.LibraryPath, manifest);
@@ -2237,7 +2063,6 @@ public class FederationController : ControllerBase
             RemoveLibraryItems(deletedPaths);
         }
 
-        FederatedPathHelper.TryDeletePeerContentFolders(config, peerName);
         _libraryManager.QueueLibraryScan();
 
         return (deletedMovies, deletedSeries);
@@ -2246,8 +2071,6 @@ public class FederationController : ControllerBase
     private async Task<int> RemovePeerFromEntriesAsync(
         Dictionary<string, ManifestEntry> entries,
         string peerName,
-        string itemType,
-        PluginConfiguration config,
         List<string> deletedPaths,
         CancellationToken cancellationToken)
     {
@@ -2280,13 +2103,10 @@ public class FederationController : ControllerBase
                 continue;
             }
 
-            var removedPrimary = removedSources.Any(source =>
-                string.Equals(source.PeerName, entry.PeerName, StringComparison.OrdinalIgnoreCase) &&
-                string.Equals(source.JellyfinId, entry.JellyfinId, StringComparison.Ordinal));
-
             foreach (var source in removedSources)
             {
                 remainingSources.Remove(source);
+                _ = _strmWriter.DeletePeerSourceFiles(entry.Path, source.PeerName);
             }
 
             entry.Sources = remainingSources;
@@ -2304,20 +2124,8 @@ public class FederationController : ControllerBase
                 continue;
             }
 
-            if (removedPrimary || string.IsNullOrWhiteSpace(entry.PeerName))
-            {
-                PromotePrimarySource(entry);
-                TryMoveEntryToPrimaryPeerFolder(entry);
-                await RehydratePromotedEntryAsync(entry, key, itemType, config, cancellationToken).ConfigureAwait(false);
-            }
-            else if (string.Equals(itemType, "Movie", StringComparison.Ordinal))
-            {
-                await _strmWriter.RefreshMovieProvenanceAsync(entry.Path, entry, key, cancellationToken).ConfigureAwait(false);
-            }
-            else
-            {
-                await _strmWriter.RefreshSeriesProvenanceAsync(entry.Path, entry, key, cancellationToken).ConfigureAwait(false);
-            }
+            NormalizeDisplaySource(entry);
+            await _strmWriter.RefreshProvenanceAsync(entry.Path, entry, cancellationToken).ConfigureAwait(false);
 
             entry.SyncedAt = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
         }
@@ -2325,183 +2133,10 @@ public class FederationController : ControllerBase
         return deletedCount;
     }
 
-    private async Task RehydratePromotedEntryAsync(
-        ManifestEntry entry,
-        string itemKey,
-        string itemType,
-        PluginConfiguration config,
-        CancellationToken cancellationToken)
-    {
-        if (string.Equals(itemType, "Movie", StringComparison.Ordinal))
-        {
-            var primary = entry.PrimarySource;
-            if (!string.IsNullOrWhiteSpace(primary?.StreamUrl))
-            {
-                await _strmWriter.RewriteMovieStreamAsync(entry.Path, entry, primary.StreamUrl, itemKey, cancellationToken)
-                    .ConfigureAwait(false);
-            }
-            else
-            {
-                await _strmWriter.RefreshMovieProvenanceAsync(entry.Path, entry, itemKey, cancellationToken)
-                    .ConfigureAwait(false);
-            }
-
-            return;
-        }
-
-        var primaryPeer = config.Peers.FirstOrDefault(peer =>
-            string.Equals(peer.Name, entry.PeerName, StringComparison.OrdinalIgnoreCase));
-        if (primaryPeer is not null)
-        {
-            var seasons = await _peerClient.GetSeasonsAsync(primaryPeer, entry.JellyfinId, cancellationToken)
-                .ConfigureAwait(false);
-            if (seasons is not null)
-            {
-                await _strmWriter.RewriteSeriesEpisodeStreamsAsync(entry.Path, seasons, entry, itemKey, cancellationToken)
-                    .ConfigureAwait(false);
-                return;
-            }
-        }
-
-        await _strmWriter.RefreshSeriesProvenanceAsync(entry.Path, entry, itemKey, cancellationToken)
-            .ConfigureAwait(false);
-    }
-
-    private static void PromotePrimarySource(ManifestEntry entry)
-    {
-        if (entry.Sources.Count == 0)
-        {
-            return;
-        }
-
-        var current = entry.Sources.FirstOrDefault(source =>
-            string.Equals(source.PeerName, entry.PeerName, StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(source.JellyfinId, entry.JellyfinId, StringComparison.Ordinal));
-        if (current is not null)
-        {
-            entry.PeerName = current.PeerName;
-            entry.JellyfinId = current.JellyfinId;
-            return;
-        }
-
-        var preferred = entry.Sources
-            .OrderByDescending(source => (source.Width ?? 0) * (source.Height ?? 0))
-            .ThenByDescending(source => ParseUpdatedAt(source.UpdatedAt))
-            .ThenBy(source => source.PeerName, StringComparer.OrdinalIgnoreCase)
-            .First();
-
-        entry.PeerName = preferred.PeerName;
-        entry.JellyfinId = preferred.JellyfinId;
-    }
-
     private static DateTime ParseUpdatedAt(string? value)
         => DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var parsed)
             ? parsed
             : DateTime.MinValue;
-
-    [SuppressMessage("Security", "CA3003:Review code for file path injection vulnerabilities", Justification = "entry.Path comes from persisted manifest data owned by JellyFed.")]
-    private static void TryMoveEntryToPrimaryPeerFolder(ManifestEntry entry)
-    {
-        if (string.IsNullOrWhiteSpace(entry.Path) || !Directory.Exists(entry.Path))
-        {
-            return;
-        }
-
-        var itemDir = new DirectoryInfo(entry.Path);
-        var currentPeerDir = itemDir.Parent;
-        var rootDir = currentPeerDir?.Parent;
-        if (currentPeerDir is null || rootDir is null)
-        {
-            return;
-        }
-
-        var targetPeerDir = Path.Combine(rootDir.FullName, StrmWriter.SanitizePeerFolderSegment(entry.PeerName));
-        if (string.Equals(currentPeerDir.FullName, targetPeerDir, StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        Directory.CreateDirectory(targetPeerDir);
-        var targetPath = Path.Combine(targetPeerDir, itemDir.Name);
-        if (Directory.Exists(targetPath))
-        {
-            return;
-        }
-
-        Directory.Move(entry.Path, targetPath);
-        entry.Path = targetPath;
-
-        if (!currentPeerDir.EnumerateFileSystemInfos().Any())
-        {
-            currentPeerDir.Delete();
-        }
-    }
-
-    private static void AppendMultiSourceItems(
-        List<object> items,
-        Dictionary<string, ManifestEntry> entries,
-        string itemType,
-        string? search,
-        int limit)
-    {
-        foreach (var pair in entries.OrderBy(kv => GetEntryDisplayTitle(kv.Value), StringComparer.OrdinalIgnoreCase))
-        {
-            if (items.Count >= limit)
-            {
-                return;
-            }
-
-            var entry = pair.Value;
-            var sources = entry.Sources?.Where(source => !string.IsNullOrWhiteSpace(source.PeerName)).ToList() ?? [];
-            if (sources.Count <= 1)
-            {
-                continue;
-            }
-
-            var title = GetEntryDisplayTitle(entry);
-            if (!string.IsNullOrWhiteSpace(search))
-            {
-                var matches = title.Contains(search, StringComparison.OrdinalIgnoreCase)
-                    || pair.Key.Contains(search, StringComparison.OrdinalIgnoreCase)
-                    || sources.Any(source => source.PeerName.Contains(search, StringComparison.OrdinalIgnoreCase));
-                if (!matches)
-                {
-                    continue;
-                }
-            }
-
-            items.Add(new
-            {
-                itemType,
-                itemKey = pair.Key,
-                title,
-                path = entry.Path,
-                primaryPeerName = entry.PeerName,
-                sources = sources.Select(source => new
-                {
-                    peerName = source.PeerName,
-                    jellyfinId = source.JellyfinId,
-                    width = source.Width,
-                    height = source.Height,
-                    updatedAt = source.UpdatedAt
-                }).ToArray()
-            });
-        }
-    }
-
-    private static string GetEntryDisplayTitle(ManifestEntry entry)
-    {
-        if (!string.IsNullOrWhiteSpace(entry.Path))
-        {
-            var name = Path.GetFileName(entry.Path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-            if (!string.IsNullOrWhiteSpace(name))
-            {
-                return name;
-            }
-        }
-
-        return entry.JellyfinId;
-    }
 
     private static IEnumerable<string> EnumerateSourcePeers(ManifestEntry entry)
         => entry.Sources is { Count: > 0 }
@@ -2513,11 +2148,66 @@ public class FederationController : ControllerBase
     private static bool EntryContainsPeer(ManifestEntry entry, string peerName)
         => EnumerateSourcePeers(entry).Any(name => string.Equals(name, peerName, StringComparison.OrdinalIgnoreCase));
 
+    private static long SourceDiskBytes(ManifestEntry entry, string peerName)
+    {
+        long total = 0;
+        foreach (var source in entry.Sources.Where(source => string.Equals(source.PeerName, peerName, StringComparison.OrdinalIgnoreCase)))
+        {
+            total += FileSize(source.StrmPath);
+            total += FileSize(source.NfoPath);
+        }
+
+        if (total > 0 || !Directory.Exists(entry.Path))
+        {
+            return total;
+        }
+
+        var peerSuffix = $" [peer-{StrmWriter.SanitizePeerFolderSegment(peerName)}]";
+        foreach (var filePath in Directory.EnumerateFiles(entry.Path, "*", SearchOption.AllDirectories))
+        {
+            var name = Path.GetFileNameWithoutExtension(filePath);
+            if (name.EndsWith(peerSuffix, StringComparison.OrdinalIgnoreCase))
+            {
+                total += FileSize(filePath);
+            }
+        }
+
+        return total;
+    }
+
+    private static long FileSize(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !System.IO.File.Exists(path))
+        {
+            return 0;
+        }
+
+        return new FileInfo(path).Length;
+    }
+
+    private static void NormalizeDisplaySource(ManifestEntry entry)
+    {
+        if (entry.Sources.Count == 0)
+        {
+            entry.PeerName = string.Empty;
+            entry.JellyfinId = string.Empty;
+            return;
+        }
+
+        var display = entry.Sources
+            .OrderByDescending(source => (source.Width ?? 0) * (source.Height ?? 0))
+            .ThenByDescending(source => ParseUpdatedAt(source.UpdatedAt))
+            .ThenBy(source => source.PeerName, StringComparer.OrdinalIgnoreCase)
+            .First();
+
+        entry.PeerName = display.PeerName;
+        entry.JellyfinId = display.JellyfinId;
+    }
+
     /// <summary>
-    /// Renames a peer's folder under each effective root (movies / series / anime) and rewrites
-    /// all manifest entries referencing the old path prefix. Updates the peer-state store key.
+    /// Renames peer-tagged flattened files and rewrites manifest sources. Updates the peer-state store key.
     /// </summary>
-    [SuppressMessage("Security", "CA3003:Review code for file path injection vulnerabilities", Justification = "Folder paths are composed from admin-configured roots + sanitized peer segments (SanitizePeerFolderSegment).")]
+    [SuppressMessage("Security", "CA3003:Review code for file path injection vulnerabilities", Justification = "Paths come from the JellyFed-owned manifest.")]
     private void RenamePeerOnDisk(PluginConfiguration config, string oldName, string newName)
     {
         if (string.IsNullOrWhiteSpace(config.LibraryPath))
@@ -2525,60 +2215,6 @@ public class FederationController : ControllerBase
             return;
         }
 
-        var oldSeg = StrmWriter.SanitizePeerFolderSegment(oldName);
-        var newSeg = StrmWriter.SanitizePeerFolderSegment(newName);
-        if (string.Equals(oldSeg, newSeg, StringComparison.Ordinal))
-        {
-            // Segments identical (e.g. only casing changed after sanitization) — still update
-            // manifest PeerName below but skip the disk moves.
-        }
-
-        var roots = new[]
-        {
-            config.GetEffectiveMoviesRoot(),
-            config.GetEffectiveSeriesRoot(),
-            config.GetEffectiveAnimeRoot()
-        };
-
-        var renames = new List<(string OldDir, string NewDir)>();
-
-        foreach (var root in roots)
-        {
-            if (string.IsNullOrWhiteSpace(root))
-            {
-                continue;
-            }
-
-            var r = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            var oldDir = Path.Combine(r, oldSeg);
-            var newDir = Path.Combine(r, newSeg);
-
-            if (!string.Equals(oldDir, newDir, StringComparison.Ordinal) && Directory.Exists(oldDir))
-            {
-                if (Directory.Exists(newDir))
-                {
-                    _logger.LogWarning(
-                        "JellyFed rename: target folder already exists, skipping move: {NewDir}",
-                        newDir);
-                    continue;
-                }
-
-                try
-                {
-                    Directory.Move(oldDir, newDir);
-                    renames.Add((oldDir, newDir));
-                    _logger.LogInformation("JellyFed rename: moved {Old} -> {New}", oldDir, newDir);
-                }
-#pragma warning disable CA1031 // Best effort: a failed move is logged but doesn't block the config update.
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "JellyFed rename: could not move {Old} -> {New}", oldDir, newDir);
-                }
-#pragma warning restore CA1031
-            }
-        }
-
-        // Rewrite manifest paths and PeerName for every entry of the old peer.
         var manifest = ManifestStore.Load(config.LibraryPath);
         bool manifestChanged = false;
 
@@ -2603,16 +2239,8 @@ public class FederationController : ControllerBase
                     source.PeerName = newName;
                 }
 
-                foreach (var (oldDir, newDir) in renames)
-                {
-                    if (entry.Path.StartsWith(oldDir + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) ||
-                        string.Equals(entry.Path, oldDir, StringComparison.OrdinalIgnoreCase))
-                    {
-                        entry.Path = string.Equals(entry.Path, oldDir, StringComparison.OrdinalIgnoreCase)
-                            ? newDir
-                            : string.Concat(newDir, entry.Path.AsSpan(oldDir.Length));
-                    }
-                }
+                _strmWriter.RenamePeerSourceFiles(entry.Path, oldName, newName);
+                NormalizeDisplaySource(entry);
 
                 manifestChanged = true;
             }

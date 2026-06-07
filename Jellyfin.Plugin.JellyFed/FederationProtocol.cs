@@ -10,7 +10,7 @@ public static class FederationProtocol
     /// <summary>
     /// Current persisted schema version for JellyFed-owned documents.
     /// </summary>
-    public const int CurrentSchemaVersion = 1;
+    public const int CurrentSchemaVersion = 2;
 
     /// <summary>
     /// Current breaking-protocol version exposed by the federation API.
@@ -34,7 +34,7 @@ public static class FederationProtocol
     [
         "stable-instance-id",
         "per-peer-access-tokens",
-        "per-peer-roots",
+        "flattened-multi-version-layout",
         "sync-anime-toggle",
         "stream-proxy",
         "image-proxy"

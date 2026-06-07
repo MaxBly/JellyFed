@@ -1,7 +1,7 @@
 ---
 name: "JellyFed"
 guid: "ff0164d7-e8c0-44c1-bc61-45017125a155"
-version: "0.1.0.17"
+version: "0.1.0.18"
 targetAbi: "10.11.0.0"
 framework: "net9.0"
 overview: "Native federation between Jellyfin instances"
@@ -14,6 +14,6 @@ owner: "MaxBly"
 artifacts:
 - "Jellyfin.Plugin.JellyFed.dll"
 changelog: >
-  Integrate the v1 foundation, discovery/admin control, audit logs, multi-source provenance,
-  native player-side source selection for movies and series episodes via IMediaSourceProvider,
-  and a unified /JellyFed API with explicit version reporting plus non-blocking peer mismatch warnings.
+  Replace the experimental sources.json/IMediaSourceProvider flow with the v2 flattened
+  multi-version layout, generate one .strm/.nfo per peer source, prefer SelfUrl for
+  advertised stream URLs, and keep peer pruning scoped to per-peer materialized files.

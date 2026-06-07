@@ -120,7 +120,7 @@
                             <li>
                                 Ajoute des bibliothèques Jellyfin pointant vers <code>{MoviesRoot}</code>, <code>{SeriesRoot}</code>
                                 et <code>{AnimeRoot}</code> (types Films / Séries selon ton usage). Les <code>.strm</code> sont
-                                rangés par peer dans <code>{Racine}/{NomDuPeer}/</code>.
+                                rangés par item, avec un fichier par peer dans le dossier du média.
                             </li>
                         </ol>
                     </div>
@@ -324,22 +324,6 @@
                             <span>Save blocked list</span>
                         </button>
                         <span id="blockedStatus" style="color:#aaa;font-size:.9em;margin-left:.75em;"></span>
-                    </div>
-
-                    <div class="jf-peer-section" style="margin-top:2em;">
-                        <div class="sectionTitleContainer">
-                            <h2 class="sectionTitle">Multi-source selector</h2>
-                        </div>
-                        <div class="fieldDescription" style="margin-bottom:1em;">
-                            Federated items that currently exist on multiple peers. Pick a different primary source to rewrite local playback toward that peer.
-                        </div>
-                        <div style="display:flex;gap:.75em;flex-wrap:wrap;align-items:center;margin-bottom:1em;">
-                            <input type="text" id="sourceSearchInput" class="emby-input" placeholder="Search title, key or peer" style="min-width:18rem;flex:1;" />
-                            <button type="button" id="refreshSourcesBtn" class="emby-button raised"><span>Refresh sources</span></button>
-                            <span id="sourcesStatus" style="color:#aaa;font-size:.9em;"></span>
-                        </div>
-                        <div id="multiSourceContainer"></div>
-                        <p id="multiSourceEmpty" style="display:none;color:#888;">No multi-source items right now.</p>
                     </div>
 
                 </section>
@@ -607,7 +591,6 @@
                         console.log('[JellyFed] peers/details —', peerDetailsCache.length + ' peer(s); lastGlobalSyncAt=', lastGlobal);
                         renderPeerDetails(page, peerDetailsCache, discoveredPeers, lastGlobal, selfDiscoverable, selfVersion);
                         loadBlocked(page);
-                        loadMultiSourceItems(page);
                     }).catch(function (err) {
                         console.error('[JellyFed] peers/details — error:', err);
                         page.querySelector('#peersHeaderStatus').textContent = 'Error: ' + err.message;
@@ -933,104 +916,6 @@
                         setTimeout(function () { status.textContent = ''; }, 2500);
                         loadBlocked(page);
                     }).catch(function () { status.textContent = 'Error.'; });
-                }
-
-                function setSourcesStatus(page, text, color) {
-                    var el = page.querySelector('#sourcesStatus');
-                    if (!el) { return; }
-                    el.textContent = text || '';
-                    el.style.color = color || '#aaa';
-                }
-
-                function loadMultiSourceItems(page) {
-                    var search = (page.querySelector('#sourceSearchInput').value || '').trim();
-                    setSourcesStatus(page, 'Loading multi-source items…');
-                    return fetch(jellyFedUrl('/JellyFed/admin/sources?limit=100' + (search ? '&search=' + encodeURIComponent(search) : '')), {
-                        method: 'GET',
-                        headers: authHeaders(false)
-                    }).then(function (r) {
-                        if (!r.ok) { throw new Error('HTTP ' + r.status); }
-                        return r.json();
-                    }).then(function (data) {
-                        renderMultiSourceItems(page, (data && data.items) || []);
-                    }).catch(function (err) {
-                        setSourcesStatus(page, 'Error: ' + err.message, '#e07070');
-                    });
-                }
-
-                function renderMultiSourceItems(page, items) {
-                    var container = page.querySelector('#multiSourceContainer');
-                    var empty = page.querySelector('#multiSourceEmpty');
-                    container.innerHTML = '';
-
-                    if (!items || items.length === 0) {
-                        empty.style.display = 'block';
-                        setSourcesStatus(page, 'No multi-source items found.');
-                        return;
-                    }
-
-                    empty.style.display = 'none';
-                    setSourcesStatus(page, items.length + ' multi-source item(s)');
-
-                    items.forEach(function (item) {
-                        var card = document.createElement('div');
-                        card.className = 'jf-peer-card';
-                        card.innerHTML =
-                            '<div class="jf-peer-head">' +
-                                '<span class="jf-peer-name">' + escHtml(item.title || item.itemKey) + '</span>' +
-                                '<span class="jf-badge">' + escHtml(item.itemType || 'Item') + '</span>' +
-                                '<span class="jf-badge">primary: ' + escHtml(item.primaryPeerName || 'unknown') + '</span>' +
-                            '</div>' +
-                            '<div class="jf-peer-meta"><code>' + escHtml(item.itemKey || '') + '</code></div>' +
-                            '<div class="jf-peer-actions" style="flex-wrap:wrap;"></div>';
-
-                        var actions = card.querySelector('.jf-peer-actions');
-                        (item.sources || []).forEach(function (source) {
-                            var btn = document.createElement('button');
-                            btn.type = 'button';
-                            btn.className = 'emby-button raised';
-                            var label = source.peerName || 'unknown';
-                            if (source.width && source.height) {
-                                label += ' · ' + source.width + 'x' + source.height;
-                            }
-                            if (item.primaryPeerName && source.peerName === item.primaryPeerName) {
-                                btn.disabled = true;
-                                label += ' · active';
-                            }
-                            btn.innerHTML = '<span>' + escHtml(label) + '</span>';
-                            btn.addEventListener('click', function () {
-                                selectPrimarySource(page, item, source.peerName, btn);
-                            });
-                            actions.appendChild(btn);
-                        });
-
-                        container.appendChild(card);
-                    });
-                }
-
-                function selectPrimarySource(page, item, peerName, btn) {
-                    btn.disabled = true;
-                    var span = btn.querySelector('span');
-                    var old = span.textContent;
-                    span.textContent = 'Switching…';
-                    fetch(jellyFedUrl('/JellyFed/admin/sources/select'), {
-                        method: 'POST',
-                        headers: authHeaders(true),
-                        body: JSON.stringify({ ItemType: item.itemType, ItemKey: item.itemKey, PeerName: peerName })
-                    }).then(function (r) {
-                        if (!r.ok) {
-                            return readErrorMessage(r).then(function (msg) { throw new Error(msg); });
-                        }
-                        return r.json();
-                    }).then(function () {
-                        setSourcesStatus(page, 'Primary source updated for ' + (item.title || item.itemKey) + '.', '#52b788');
-                        loadMultiSourceItems(page);
-                        loadPeerDetails(page);
-                    }).catch(function (err) {
-                        btn.disabled = false;
-                        span.textContent = old;
-                        setSourcesStatus(page, 'Error: ' + err.message, '#e07070');
-                    });
                 }
 
                 // ── Add peer modal ────────────────────────────────────────────
@@ -1530,13 +1415,6 @@
                 });
 
                 page.querySelector('#saveBlockedBtn').addEventListener('click', function () { saveBlocked(page); });
-                page.querySelector('#refreshSourcesBtn').addEventListener('click', function () { loadMultiSourceItems(page); });
-                page.querySelector('#sourceSearchInput').addEventListener('keydown', function (e) {
-                    if (e.key === 'Enter') {
-                        e.preventDefault();
-                        loadMultiSourceItems(page);
-                    }
-                });
 
                 page.querySelector('#refreshLogsBtn').addEventListener('click', function () {
                     refreshLogs(page);

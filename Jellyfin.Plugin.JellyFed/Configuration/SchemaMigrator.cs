@@ -73,6 +73,12 @@ public static class SchemaMigrator
 
         if (manifest.SchemaVersion < FederationProtocol.CurrentSchemaVersion)
         {
+            if ((manifest.Movies?.Count ?? 0) > 0 || (manifest.Series?.Count ?? 0) > 0)
+            {
+                throw new InvalidOperationException(
+                    $"JellyFed manifest schema v{manifest.SchemaVersion} uses the pre-v2 per-peer layout. Reset the JellyFed network or purge the old federated library before upgrading to schema v{FederationProtocol.CurrentSchemaVersion}.");
+            }
+
             manifest.SchemaVersion = FederationProtocol.CurrentSchemaVersion;
             changed = true;
         }

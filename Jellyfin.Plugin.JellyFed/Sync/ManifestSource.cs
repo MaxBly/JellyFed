@@ -14,7 +14,13 @@ public class ManifestSource
     /// <summary>Gets or sets the Jellyfin item ID on the remote peer.</summary>
     public string JellyfinId { get; set; } = string.Empty;
 
-    /// <summary>Gets or sets the direct stream URL when applicable (movies / episodes fallback groundwork).</summary>
+    /// <summary>Gets or sets the representative local .strm path for this source, when there is one file per source.</summary>
+    public string? StrmPath { get; set; }
+
+    /// <summary>Gets or sets the representative local .nfo path for this source, when there is one file per source.</summary>
+    public string? NfoPath { get; set; }
+
+    /// <summary>Gets or sets the direct stream URL when applicable.</summary>
     public string? StreamUrl { get; set; }
 
     /// <summary>Gets or sets the container format.</summary>

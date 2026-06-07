@@ -1,154 +1,156 @@
 # JellyFed
 
-Plugin Jellyfin pour la fédération native d'instances.
+Plugin Jellyfin pour fédérer nativement plusieurs instances Jellyfin.
 
-Connecte plusieurs serveurs Jellyfin entre eux : depuis un seul client, on accède aux bibliothèques de toutes les instances fédérées — avec artwork, métadonnées, transcodage HLS et sélection de pistes — de façon transparente pour tous les clients officiels.
+JellyFed synchronise les catalogues de peers distants sous forme de fichiers `.strm` et `.nfo`. Les clients Jellyfin voient ensuite les médias distants comme des médias locaux, avec métadonnées, artwork, pistes audio/sous-titres et transcodage HLS piloté par Jellyfin.
+
+JellyFed est autonome : il ne dépend d'aucun client spécifique. Les clients officiels Jellyfin, Infuse, Kodi ou une interface web externe consomment simplement Jellyfin.
 
 ---
 
 ## Concept
 
-```
+```text
 [Client Jellyfin]
-       │
-       ▼
-[Instance A  ←──── JellyFed ────→  Instance B]
-       │                                 │
-  Bibliothèque A                   Bibliothèque B
-  (locale)                         (partagée via .strm + NFO)
+       |
+       v
+[Instance A + JellyFed] <---- federation ----> [Instance B + JellyFed]
+       |
+       v
+Bibliothèque locale Jellyfin
+  + médias locaux
+  + versions distantes matérialisées en .strm
 ```
 
-Instance A installe JellyFed. Elle se connecte à l'Instance B. Le plugin synchronise le catalogue de B dans A sous forme de fichiers `.strm` + `.nfo` dans une bibliothèque virtuelle. Les clients voient les médias de B comme s'ils étaient locaux — avec artwork, pistes audio/sous-titres, transcodage HLS si nécessaire.
+Chaque peer expose son catalogue via `/JellyFed/catalog`. L'instance consommatrice écrit une version `.strm` par peer dans un dossier logique commun :
+
+```text
+{MoviesRoot}/
+  Anora (2024) [tmdbid-1064213]/
+    Anora (2024) [peer-b].strm
+    Anora (2024) [peer-b].nfo
+    Anora (2024) [peer-c].strm
+    Anora (2024) [peer-c].nfo
+    poster.jpg
+    fanart.jpg
+```
+
+Jellyfin peut alors fusionner ces fichiers comme des versions d'un même média grâce aux IDs TMDB/NFO. Le sélecteur de version est celui du player Jellyfin, pas un provider custom JellyFed.
 
 ---
 
 ## Fonctionnalités
 
-### Catalogue & streaming
-- Exposition du catalogue local via `GET /JellyFed/catalog` (films + séries + codec info)
-- Proxy stream `/JellyFed/stream/{id}?token=...` — aucune clé API dans les `.strm`
-- Proxy image `/JellyFed/image/{id}/{type}?token=...` — fallback si pas de `JellyfinApiKey`
-- Infos codec + toutes les pistes audio/sous-titres exposées dans le catalogue
-- Sélecteur multi-source natif dans le player Jellyfin (films + épisodes de séries quand plusieurs peers exposent le même contenu)
-- Décision transcodage HLS correcte grâce aux infos `<fileinfo><streamdetails>` dans les NFO
-- Seeking fonctionnel (range requests sur le fichier source)
+### Catalogue et lecture
+
+- `GET /JellyFed/catalog` expose films et séries locaux, hors contenu déjà fédéré.
+- `GET /JellyFed/catalog/series/{id}/seasons` expose épisodes et infos de pistes.
+- `.strm` sans clé API Jellyfin : URL `/JellyFed/stream/{id}?token=...`.
+- Images via `/JellyFed/image/{id}/{type}?token=...` ou URL Jellyfin native si `JellyfinApiKey` est configurée.
+- NFO enrichis avec `<fileinfo><streamdetails>` pour aider Jellyfin à décider direct-play, direct-stream ou transcodage HLS.
+- Versions multiples par item via fichiers `.strm` multiples dans le même dossier logique.
 
 ### Synchronisation
-- Tâche planifiée `IScheduledTask` (intervalle configurable, défaut 6h)
-- Manifest logique JSON + `sources[]` — évite la re-création des `.strm` déjà présents et prépare le multi-source
-- Mise à jour automatique des NFO existants à chaque sync (codec, pistes audio, sous-titres)
-- Sidecar `sources.json` écrit à côté de chaque item pour la provenance locale, avec `episodeSources[]` pour les séries
-- Provenance visible via tags / studio (`JellyFed:primary:*`, `JellyFed:source:*`, `JellyFed:{peer}`)
-- Pruning automatique des `.strm` dont les items ont disparu du peer, sans supprimer l'item si une autre source reste
-- Déduplication par TMDB ID (pas de doublon si contenu déjà présent localement)
-- Rescan Jellyfin déclenché après chaque sync
 
-### Gestion des peers
-- Endpoint handshake `GET /JellyFed/system/info` + endpoint `GET /JellyFed/version` pour exposer la version locale
-- L'onglet Peers remonte aussi la version de chaque peer et affiche un warning non bloquant si elle diffère de l'instance locale
-- Onglet dédié « Peers » dans la page de configuration (Readme / Settings / Peers / Danger Zone)
-- Séparation claire entre **direct peers** (configurés, synchronisables) et **discovered peers** (suggestions uniquement)
-- Cartes par peer avec statut online/offline, version, dernière sync (badge ok/failed/never + erreur), durée
-- Compteurs synced par peer : catalogue distant (films / séries) vs local (films / séries / anime) + disque utilisé
-- Toggles par peer : Enabled, Films, Séries, Anime (PATCH live sans bouton Save)
-- Actions fine-grained : Resync ce peer, Purge .strm, Edit (nom / URL / token, avec renommage des dossiers), Remove (purge + révocation token + blacklist)
-- Ajout de peer via modal avec health-check préalable, y compris pré-remplissage depuis une suggestion découverte
-- Discovery v1 limitée à **deux sauts conceptuels** : un peer direct peut suggérer ses peers directs discoverable, sans mesh récursif
-- Mode **manual add only** : aucune suggestion ne déclenche une sync tant qu'un admin n'a pas ajouté le peer explicitement
-- Toggle **Discoverable / Invisible** pour contrôler si cette instance peut apparaître dans les suggestions second-hop
-- Heartbeat toutes les 5 minutes + refresh admin pour maintenir l'état de discovery à jour
-- Blacklist automatique des peers supprimés (masque l'URL dans les suggestions tant qu'elle n'est pas débloquée)
+- Tâche planifiée `IScheduledTask`, intervalle configurable, défaut 6h.
+- Manifest JSON local `.jellyfed-manifest.json`, schéma v2.
+- Layout aplati par item : pas de sous-dossier par peer.
+- Pruning par source : si un peer perd un item, seuls ses fichiers `[peer-X]` sont retirés ; l'item reste si d'autres sources existent.
+- Rescan Jellyfin déclenché après sync.
 
-### Sécurité
-- Token de fédération auto-généré au démarrage (non éditable)
-- `InstanceId` stable auto-généré côté config pour les handshakes / diagnostics inter-peers
-- Store d'audit persistant SQLite (`.jellyfed-audit.sqlite3`) pour sécurité, accès peer et événements de connexion
-- Endpoints admin-only sous `/JellyFed/logs/*` + onglet **Logs** (all / security / peer connections / peer access history)
-- Attribution des accès par `PeerId` stable quand un peer utilise son `AccessToken` dédié (fallback global token conservé pour le bootstrap)
-- Clé API Jellyfin optionnelle (`JellyfinApiKey`) — reste côté serveur, jamais dans les `.strm`
-- Bouton "Reset Network" : nouveau token + suppression de tous les peers et `.strm`
-- `X-Forwarded-Proto` respecté derrière un reverse proxy
+### Peers et discovery
 
-### UI admin
-- Page avec 5 onglets : **Readme** (intro + setup, ouvert par défaut), **Settings** (globaux), **Peers** (liste + actions), **Logs** (audit), **Danger Zone** (reset network)
-- Token de fédération en lecture seule avec bouton Copy
-- Blocked Peers déplacés dans l'onglet Peers (unblock + save)
-- Onglet Logs : vue admin des événements persistés, filtres par scope et peer, pagination
-- Reset Network isolé dans son propre onglet pour éviter les clics accidentels
+- Handshake `GET /JellyFed/system/info` et version `GET /JellyFed/version`.
+- Peers directs configurés manuellement dans l'UI.
+- Discovery v1 limitée aux suggestions second-hop, sans sync automatique.
+- Toggle par peer : Enabled, Films, Séries, Anime.
+- Actions : test, sync d'un peer, purge, remove, edit.
+
+### Sécurité et audit
+
+- Token de fédération auto-généré au démarrage.
+- `InstanceId` stable en configuration.
+- Access tokens per-peer révocables après registration.
+- `JellyfinApiKey` optionnelle, utilisée uniquement côté serveur.
+- Audit persistant SQLite dans `.jellyfed-audit.sqlite3`.
+- Endpoints logs admin-only sous `/JellyFed/logs/*`.
 
 ---
 
 ## Compatibilité
 
-- **Jellyfin** : 10.11.x
-- **.NET** : 9.0
-- **Clients** : tous (web, Android, iOS, Infuse, Kodi...)
+- Jellyfin : `10.11.x`
+- .NET : `9.0`
+- Plugin actuel : `0.1.0.18-dev` côté code, manifest de release à bumper au prochain build publié
 
 ---
 
 ## Installation
 
-### Via le dépôt (recommandé)
+### Via dépôt
 
-Ajoutez dans Jellyfin → Dashboard → Plugins → Repositories :
-```
+Dans Jellyfin → Dashboard → Plugins → Repositories :
+
+```text
 https://jellyfed.bly-net.com/repo/manifest.json
 ```
-Puis installez JellyFed depuis le catalogue.
+
+Puis installer JellyFed depuis le catalogue.
 
 ### Manuelle
 
-1. Télécharger la dernière release depuis GitHub
-2. Extraire `Jellyfin.Plugin.JellyFed.dll`
-3. Copier dans `{config}/plugins/JellyFed_{version}/`
-4. Redémarrer Jellyfin
+1. Télécharger la release.
+2. Extraire `Jellyfin.Plugin.JellyFed.dll`.
+3. Copier dans `{config}/plugins/JellyFed_{version}/`.
+4. Redémarrer Jellyfin.
 
 ### Configuration minimale
 
-```
-Federation Token : <auto-généré>
-Instance ID      : <auto-généré, stable>
+```text
+Federation Token : auto-généré
+Instance ID      : auto-généré
 Instance Name    : mon-serveur
 Self URL         : https://mon-jellyfin.example.com
-Discoverable     : true
-Sync Interval    : 6 (heures)
-Library Path     : <auto-défini>
+Discoverable     : true/false
+Sync Interval    : 6
+Metadata Path    : {DataPath}/jellyfed-library
+Movies Root      : {Metadata Path}/Films
+Series Root      : {Metadata Path}/Series
+Anime Root       : {Metadata Path}/Animes
 ```
 
-Ajouter un peer direct (URL + token du peer distant) depuis l'onglet **Peers**. Les peers découverts restent des suggestions jusqu'à ajout manuel.
+`Self URL` est important : les URLs écrites dans les `.strm` doivent être joignables par le FFmpeg de l'instance qui lit le média. En environnement mixte LAN/public, choisissez l'URL réellement atteignable par les peers consommateurs.
 
 ### Bibliothèques Jellyfin
 
-Après la première sync, ajoutez des bibliothèques Jellyfin qui pointent vers les **racines** configurées (ou les défauts sous le dossier métadonnées) :
-- **Films** : dossier `Movies root` (défaut `{LibraryPath}/Films`) — type **Films**
-- **Séries** : dossier `TV series root` (défaut `{LibraryPath}/Series`) — type **Séries**
-- **Animes** (optionnel) : dossier `Anime root` (défaut `{LibraryPath}/Animes`) — type **Films** ou **Séries** selon ce que tu y synchronises
+Ajoutez dans Jellyfin des bibliothèques qui scannent les racines JellyFed :
 
-Les `.strm` sont rangés par **peer** : `{Racine}/{NomDuPeer}/…`.
+- Films : `MoviesRoot`
+- Séries : `SeriesRoot`
+- Anime : `AnimeRoot`, selon votre usage
 
-### JellyfinApiKey (optionnel)
-
-Créer une clé dédiée dans Dashboard → API Keys.
-La renseigner dans la config JellyFed. Permet :
-- Images en qualité native via l'API Jellyfin
-- Redirect du stream vers le pipeline natif Jellyfin (transcodage avancé)
+Si vous voulez que Jellyfin fusionne médias locaux et versions fédérées, ajoutez la racine locale et la racine JellyFed dans la même bibliothèque Jellyfin.
 
 ---
 
 ## Documentation
 
-- [`docs/architecture.md`](docs/architecture.md) — Architecture technique, flux de sync, authentification
-- [`docs/api.md`](docs/api.md) — Référence API (tous les endpoints + DTOs)
-- [`docs/strm.md`](docs/strm.md) — Fichiers .strm, NFO format, comportement lecture/transcodage
-- [`docs/roadmap.md`](docs/roadmap.md) — État d'avancement, tests, bugs connus, features à venir
-- [`docs/v1-scope.md`](docs/v1-scope.md) — Plan v1 : contrats publics à figer, features obligatoires avant release stable, critères de validation
-- [`docs/dev-local-repo.md`](docs/dev-local-repo.md) — Servir le dépôt plugin (`repo/`) sur le LAN avec Docker (dev) ; raccourci : `make dev` (build + ZIP + serveur)
+- [`docs/architecture.md`](docs/architecture.md) : architecture et flux de sync
+- [`docs/api.md`](docs/api.md) : endpoints publics, fédération et admin
+- [`docs/strm.md`](docs/strm.md) : layout `.strm` / `.nfo` et lecture
+- [`docs/roadmap.md`](docs/roadmap.md) : état d'avancement et bugs connus
+- [`docs/v1-scope.md`](docs/v1-scope.md) : critères v1
+- [`docs/validation-v1.md`](docs/validation-v1.md) : validations runtime avant release v1
+- [`docs/dev-local-repo.md`](docs/dev-local-repo.md) : dépôt plugin local de développement
+- [`docs/gitea-ci.md`](docs/gitea-ci.md) : dépôt Jellyfin de test via Gitea Actions et release `latest`
+
+Les fichiers `docs/handoff-2026-06-01.md` et `docs/dew-integration-gaps.md` sont des notes internes/historiques, pas de la documentation produit.
 
 ---
 
 ## Limitations connues
 
-| # | Description | Statut |
+| ID | Description | Statut |
 |---|---|---|
-| BUG-05 | Sous-titres SRT/ASS non affichés (soft-sub WebVTT) | 🔴 P1 |
-| BUG-06 | PGS brûlés en hard-sub (non désactivable) | 🟡 Limitation Jellyfin |
+| BUG-05 | Sous-titres SRT/ASS soft-sub à valider/corriger après layout aplati | P1 |
+| BUG-06 | PGS brûlés en hard-sub lors du transcodage HLS | Limitation Jellyfin |

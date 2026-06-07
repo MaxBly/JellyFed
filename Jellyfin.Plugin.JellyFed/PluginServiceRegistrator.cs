@@ -2,7 +2,6 @@ using Jellyfin.Plugin.JellyFed.Api;
 using Jellyfin.Plugin.JellyFed.Audit;
 using Jellyfin.Plugin.JellyFed.Sync;
 using MediaBrowser.Controller;
-using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Plugins;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -29,7 +28,6 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddScoped<AdminAccessFilter>();
         serviceCollection.AddScoped<FederationAuthFilter>();
         serviceCollection.AddSingleton<PeerClient>();
-        serviceCollection.AddSingleton<IMediaSourceProvider, FederationMediaSourceProvider>();
         serviceCollection.AddScoped<StrmWriter>();
         serviceCollection.AddScoped<FederationSyncTask>();
 
