@@ -56,8 +56,18 @@ jobs:
       - name: Package ZIP
         run: |
           mkdir -p repo
-          cd _build
-          zip -q "../repo/${{ steps.meta.outputs.zip_name }}" Jellyfin.Plugin.JellyFed.dll
+          python3 - <<'PY'
+          import zipfile
+          from pathlib import Path
+
+          zip_path = Path("repo") / "${{ steps.meta.outputs.zip_name }}"
+          dll_path = Path("_build") / "Jellyfin.Plugin.JellyFed.dll"
+
+          with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+              archive.write(dll_path, arcname=dll_path.name)
+
+          print(f"Created {zip_path}")
+          PY
 
       - name: Compute checksum
         id: checksum
