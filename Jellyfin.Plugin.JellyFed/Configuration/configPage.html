@@ -852,9 +852,10 @@
                         return r.json();
                     }).then(function (result) {
                         console.log('[JellyFed] resync', name, result);
-                        var msg = result.status === 'ok'
-                            ? 'Sync OK (+' + result.addedMovies + 'M, +' + result.addedSeries + 'S)'
-                            : 'Sync failed: ' + (result.error || 'unknown');
+                        var status = pick(result, 'status');
+                        var msg = status === 'ok'
+                            ? 'Sync OK (+' + (pick(result, 'addedMovies') || 0) + 'M, +' + (pick(result, 'addedSeries') || 0) + 'S)'
+                            : 'Sync failed: ' + (pick(result, 'error') || 'unknown');
                         alert(msg);
                         loadPeerDetails(page);
                     }).catch(function (err) {
@@ -880,7 +881,7 @@
                         return r.json();
                     }).then(function (result) {
                         console.log('[JellyFed] purge', name, result);
-                        alert('Purged: ' + result.deletedMovies + ' movies, ' + result.deletedSeries + ' series.');
+                        alert('Purged: ' + (pick(result, 'deletedMovies') || 0) + ' movies, ' + (pick(result, 'deletedSeries') || 0) + ' series.');
                         loadPeerDetails(page);
                     }).catch(function (err) {
                         console.error('[JellyFed] purge error:', err);
@@ -1025,8 +1026,9 @@
                         return r.json();
                     }).then(function (result) {
                         console.log('[JellyFed] test peer —', result);
-                        status.style.color = result.reachable ? '#7fcf7f' : '#e0a070';
-                        status.textContent = result.message || (result.reachable ? 'Reachable.' : 'Unreachable.');
+                        var reachable = !!pick(result, 'reachable');
+                        status.style.color = reachable ? '#7fcf7f' : '#e0a070';
+                        status.textContent = pick(result, 'message') || (reachable ? 'Reachable.' : 'Unreachable.');
                     }).catch(function (err) {
                         console.error('[JellyFed] test peer — error:', err);
                         status.style.color = '#e07070';
@@ -1064,9 +1066,10 @@
                         return r.json();
                     }).then(function (result) {
                         console.log('[JellyFed] add peer —', result);
-                        status.style.color = result.reachable ? '#7fcf7f' : '#e0a070';
-                        status.textContent = result.reachable
-                            ? 'Peer added (reachable, v' + (result.version || '?') + ').'
+                        var reachable = !!pick(result, 'reachable');
+                        status.style.color = reachable ? '#7fcf7f' : '#e0a070';
+                        status.textContent = reachable
+                            ? 'Peer added (reachable, v' + (pick(result, 'version') || '?') + ').'
                             : 'Peer added — unreachable for now, will retry on sync.';
                         // Refresh BOTH the cached `config` (so a later Settings "Save" doesn't wipe Peers)
                         // AND the peers list immediately. Close modal after the refresh completes.
@@ -1404,10 +1407,13 @@
                         });
                     }).then(function (result) {
                         var parts = [];
-                        if (result.created.length) { parts.push('Created: ' + result.created.join(', ')); }
-                        if (result.skipped.length) { parts.push('Already there: ' + result.skipped.join(', ')); }
-                        if (result.conflicts.length) { parts.push('Name conflict: ' + result.conflicts.join(' · ')); }
-                        setQuickLibrariesStatus(page, parts.join(' · ') || 'Nothing to do.', result.conflicts.length ? '#e0a070' : '#7fcf7f');
+                        var created = pick(result, 'created') || [];
+                        var skipped = pick(result, 'skipped') || [];
+                        var conflicts = pick(result, 'conflicts') || [];
+                        if (created.length) { parts.push('Created: ' + created.join(', ')); }
+                        if (skipped.length) { parts.push('Already there: ' + skipped.join(', ')); }
+                        if (conflicts.length) { parts.push('Name conflict: ' + conflicts.join(' · ')); }
+                        setQuickLibrariesStatus(page, parts.join(' · ') || 'Nothing to do.', conflicts.length ? '#e0a070' : '#7fcf7f');
                     }).catch(function (err) {
                         console.error('[JellyFed] createQuickLibraries — failed:', err);
                         setQuickLibrariesStatus(page, 'Error: ' + err.message, '#e07070');
@@ -1531,8 +1537,8 @@
                         if (!r.ok) { throw new Error('HTTP ' + r.status); }
                         return r.json();
                     }).then(function (result) {
-                        if (result && result.status === 'ok') {
-                            page.querySelector('#federationToken').value = result.newToken;
+                        if (result && pick(result, 'status') === 'ok') {
+                            page.querySelector('#federationToken').value = pick(result, 'newToken');
                             alert('Network reset complete. Your new federation token is active.');
                             loadSettings(page);
                             loadPeerDetails(page);
